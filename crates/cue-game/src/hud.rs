@@ -8,7 +8,10 @@ use bevy::{
     window::PrimaryWindow,
 };
 
-use crate::{shot::Aim, sim::Simulation};
+use crate::{
+    shot::Aim,
+    sim::{LastShot, Simulation},
+};
 
 /// Below this canvas width (logical px) only the status line is shown.
 const COMPACT_WIDTH: f32 = 720.0;
@@ -38,6 +41,7 @@ pub(crate) fn update(
     sim: Res<Simulation>,
     aim: Res<Aim>,
     diagnostics: Res<DiagnosticsStore>,
+    last: Res<LastShot>,
     window: Query<&Window, With<PrimaryWindow>>,
     mut text: Query<&mut Text, With<HudText>>,
 ) {
@@ -58,12 +62,43 @@ pub(crate) fn update(
     } else {
         "balls moving".to_owned()
     };
+    let shot = last.0.as_ref().map_or_else(String::new, |r| {
+        let pocketed: Vec<String> = r
+            .pocketed()
+            .map(|(b, _)| {
+                if b.is_cue() {
+                    "cue".into()
+                } else {
+                    b.number().to_string()
+                }
+            })
+            .collect();
+        let first = r
+            .first_contacts()
+            .iter()
+            .map(|b| b.number().to_string())
+            .collect::<Vec<_>>()
+            .join("+");
+        format!(
+            "   last shot: first contact {}   pocketed {}",
+            if first.is_empty() {
+                "none".into()
+            } else {
+                first
+            },
+            if pocketed.is_empty() {
+                "none".into()
+            } else {
+                pocketed.join(", ")
+            }
+        )
+    });
     let compact = window.single().is_ok_and(|w| w.width() < COMPACT_WIDTH);
     text.0 = if compact {
         format!("{fps:>3.0} fps   {state}")
     } else {
         format!(
-            "CUE - phase 1 prototype   {fps:>3.0} fps\n{state}\n\
+            "CUE - phase 2   {fps:>3.0} fps{shot}\n{state}\n\
              aim: pointer or left/right   power: drag back and release, or up/down + space\n\
              spin: WASD (C centres)   re-rack: R   cancel: Esc or right click"
         )

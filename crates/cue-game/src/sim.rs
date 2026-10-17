@@ -1,6 +1,6 @@
 use bevy::prelude::*;
-use cue_core::{BallId, TableSpec, eight_ball_rack, glam::DVec2};
-use cue_physics::{Motion, PhysicsProfile, World};
+use cue_core::{BallId, ShotReport, TableSpec, eight_ball_rack, glam::DVec2};
+use cue_physics::{Motion, PhysicsProfile, SimEvent, World};
 
 /// Longest slice of wall-clock time fed to the simulation in one frame.
 ///
@@ -13,6 +13,19 @@ const MAX_FRAME_SECONDS: f64 = 0.1;
 /// page sets it through `cue-web`; rendering is throttled separately there.
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Paused(pub bool);
+
+/// Every simulation event, as it happens: collisions, cushion contacts,
+/// pocketings. Audio and the web bridge listen to these.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct Contact(pub SimEvent);
+
+/// A shot has finished: every ball is at rest.
+#[derive(Message, Debug, Clone)]
+pub struct ShotFinished(pub ShotReport);
+
+/// The report of the most recent shot, for the HUD.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct LastShot(pub Option<ShotReport>);
 
 /// Logical id attached to every rendered ball.
 #[derive(Component, Debug, Clone, Copy)]
@@ -61,18 +74,56 @@ impl Simulation {
     }
 }
 
-/// Feeds elapsed time to the solver.
-pub(crate) fn advance(time: Res<Time>, paused: Res<Paused>, mut sim: ResMut<Simulation>) {
-    if paused.0 || sim.world.is_at_rest() {
-        return;
+/// Feeds elapsed time to the solver and forwards what happened.
+pub(crate) fn advance(
+    time: Res<Time>,
+    paused: Res<Paused>,
+    mut sim: ResMut<Simulation>,
+    mut contacts: MessageWriter<Contact>,
+    mut finished: MessageWriter<ShotFinished>,
+) {
+    if !paused.0 && !sim.world.is_at_rest() {
+        let dt = time.delta_secs_f64().min(MAX_FRAME_SECONDS);
+        let target = sim.clock + dt;
+        sim.clock = target;
+        if let Err(e) = sim.world.advance_to(target) {
+            // Never expected; the property tests exist to keep it that way.
+            error!("simulation failed, re-racking: {e}");
+            sim.rerack();
+            return;
+        }
     }
-    let dt = time.delta_secs_f64().min(MAX_FRAME_SECONDS);
-    let target = sim.clock + dt;
-    sim.clock = target;
-    if let Err(e) = sim.world.advance_to(target) {
-        // Never expected; the property tests exist to keep it that way.
-        error!("simulation failed, re-racking: {e}");
-        sim.rerack();
+    // Drained every frame, so the world's log never grows unbounded.
+    contacts.write_batch(sim.world.drain_events().map(Contact));
+    if let Some(report) = sim.world.take_report() {
+        finished.write(ShotFinished(report));
+    }
+}
+
+/// Free-play housekeeping after a shot: a pocketed cue ball goes back to the
+/// nearest free spot to the head spot, and an empty table is re-racked.
+pub(crate) fn after_shot(
+    mut finished: MessageReader<ShotFinished>,
+    mut sim: ResMut<Simulation>,
+    mut last: ResMut<LastShot>,
+) {
+    for ShotFinished(report) in finished.read() {
+        last.0 = Some(report.clone());
+        if sim.world.balls_in_play().all(|b| b.is_cue()) {
+            sim.rerack();
+            continue;
+        }
+        if report.cue_ball_pocketed() {
+            let head = sim.table().head_spot();
+            match sim.world.nearest_free_spot(BallId::CUE, head) {
+                Some(spot) => {
+                    if let Err(e) = sim.world.place(BallId::CUE, spot) {
+                        error!("could not re-spot the cue ball: {e}");
+                    }
+                }
+                None => sim.rerack(),
+            }
+        }
     }
 }
 

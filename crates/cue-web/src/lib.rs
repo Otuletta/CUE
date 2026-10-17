@@ -33,7 +33,9 @@ use bevy::{
     prelude::*,
     winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent},
 };
-use cue_game::{CuePlugin, Paused, Simulation};
+use cue_core::ShotReport;
+use cue_game::{Contact, CuePlugin, Paused, ShotFinished, Simulation};
+use cue_physics::SimEventKind;
 use wasm_bindgen::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,19 +249,84 @@ fn apply_commands(
     }
 }
 
+/// Builds a plain JS object from `(key, value)` pairs.
+fn object(entries: &[(&str, JsValue)]) -> JsValue {
+    let o = js_sys::Object::new();
+    for (key, value) in entries {
+        // Setting a property on a fresh plain object cannot fail.
+        let _ = js_sys::Reflect::set(&o, &JsValue::from_str(key), value);
+    }
+    o.into()
+}
+
+/// The `shot-end` payload: what a host might show or log about a shot.
+fn shot_summary(report: &ShotReport) -> JsValue {
+    let first: js_sys::Array = report
+        .first_contacts()
+        .iter()
+        .map(|b| JsValue::from(b.number()))
+        .collect();
+    let pocketed: js_sys::Array = report
+        .pocketed()
+        .map(|(b, p)| {
+            object(&[
+                ("ballId", JsValue::from(b.number())),
+                ("pocketId", JsValue::from_str(p.name())),
+            ])
+        })
+        .collect();
+    object(&[
+        ("shotId", JsValue::from(report.shot_id)),
+        ("firstContacts", first.into()),
+        ("pocketed", pocketed.into()),
+        ("cueBallPocketed", JsValue::from(report.cue_ball_pocketed())),
+        (
+            "objectBallsToCushion",
+            JsValue::from(report.object_balls_touching_cushion().len() as u32),
+        ),
+    ])
+}
+
 /// Translates simulation state changes into host events.
-fn emit_events(sim: Res<Simulation>, mut started: Local<bool>, mut moving: Local<bool>) {
+///
+/// Per shot the host sees exactly one `shot-start` and one `shot-end`, with
+/// any number of `ball-pocketed` in between (spec §16.4). A shot abandoned
+/// by a re-rack still ends, with `{ abandoned: true }`.
+fn emit_events(
+    sim: Res<Simulation>,
+    mut contacts: MessageReader<Contact>,
+    mut finished: MessageReader<ShotFinished>,
+    mut started: Local<bool>,
+    mut in_shot: Local<bool>,
+) {
     FRAMES.fetch_add(1, Ordering::Relaxed);
     if !*started {
         *started = true;
         emit("ready", &JsValue::from_str(&version()));
     }
-    let now_moving = !sim.world.is_at_rest();
-    if now_moving != *moving {
-        *moving = now_moving;
-        emit(
-            if now_moving { "shot-start" } else { "shot-end" },
-            &JsValue::UNDEFINED,
-        );
+    // A very soft shot can start and finish within one frame, so a finished
+    // report also counts as the start of a shot.
+    let reports: Vec<&ShotReport> = finished.read().map(|f| &f.0).collect();
+    if !*in_shot && (!sim.world.is_at_rest() || !reports.is_empty()) {
+        *in_shot = true;
+        emit("shot-start", &JsValue::UNDEFINED);
+    }
+    for Contact(event) in contacts.read() {
+        if let SimEventKind::Pocketed { ball, pocket } = event.kind {
+            emit(
+                "ball-pocketed",
+                &object(&[
+                    ("ballId", JsValue::from(ball.number())),
+                    ("pocketId", JsValue::from_str(pocket.name())),
+                ]),
+            );
+        }
+    }
+    if let Some(report) = reports.last() {
+        emit("shot-end", &shot_summary(report));
+        *in_shot = false;
+    } else if *in_shot && sim.world.is_at_rest() {
+        emit("shot-end", &object(&[("abandoned", JsValue::TRUE)]));
+        *in_shot = false;
     }
 }

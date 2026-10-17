@@ -19,7 +19,7 @@ mod sim;
 use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*};
 
 pub use shot::Aim;
-pub use sim::{Ball, Paused, Simulation};
+pub use sim::{Ball, Contact, LastShot, Paused, ShotFinished, Simulation};
 
 /// Everything CUE adds to a Bevy [`App`].
 #[derive(Debug, Default)]
@@ -38,6 +38,9 @@ impl Plugin for CuePlugin {
             })
             .insert_resource(Simulation::new(1))
             .init_resource::<Paused>()
+            .init_resource::<LastShot>()
+            .add_message::<Contact>()
+            .add_message::<ShotFinished>()
             .init_resource::<Aim>()
             .add_systems(
                 Startup,
@@ -48,6 +51,7 @@ impl Plugin for CuePlugin {
                 (
                     shot::read_input,
                     sim::advance,
+                    sim::after_shot,
                     sim::sync_balls,
                     shot::draw_aim,
                     camera::fit_to_window,

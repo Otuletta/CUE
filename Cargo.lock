@@ -2352,7 +2352,9 @@ name = "cue-web"
 version = "0.0.0"
 dependencies = [
  "bevy",
+ "cue-core",
  "cue-game",
+ "cue-physics",
  "js-sys",
  "wasm-bindgen",
 ]

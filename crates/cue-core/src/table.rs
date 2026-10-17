@@ -1,9 +1,13 @@
+use std::f64::consts::PI;
+
 use glam::DVec2;
 
-use crate::CoreError;
+use crate::{CoreError, PocketSpec};
 
 /// Metres per inch, exact by definition.
 const INCH: f64 = 0.0254;
+/// Radians per degree.
+const DEGREE: f64 = PI / 180.0;
 
 /// Physical description of a ball.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -44,43 +48,70 @@ pub struct TableSpec {
     pub playfield_width: f64,
     /// The balls played on this table.
     pub ball: BallSpec,
-    /// Corner pocket mouth, measured between the cushion noses, in metres.
-    pub corner_pocket_mouth: f64,
-    /// Side pocket mouth, measured between the cushion noses, in metres.
-    pub side_pocket_mouth: f64,
+    /// The four corner pockets.
+    pub corner_pocket: PocketSpec,
+    /// The two side pockets.
+    pub side_pocket: PocketSpec,
     /// Height of the cushion nose above the cloth, in metres.
     pub cushion_nose_height: f64,
+    /// Depth of the cushion from its nose to the wooden rail, in metres. The
+    /// pocket facings run through this depth.
+    pub cushion_width: f64,
 }
 
 impl TableSpec {
     /// A 9-foot table using the midpoints of the WPA equipment tolerances.
     ///
-    /// Playing surface 100 × 50 in; corner mouth 4½–4⅝ in; side mouth
-    /// 5–5⅛ in; cushion nose at 62.5–64.5 % of the ball diameter. These are
-    /// starting values for calibration, to be checked against the adopted
-    /// specification before any claim of conformity.
+    /// | Dimension | WPA tolerance | Used |
+    /// |---|---|---|
+    /// | Playing surface | 100 × 50 in ± ⅛ | 100 × 50 in |
+    /// | Corner mouth / facing angle | 4½–4⅝ in / 142° ± 1° | 4.5625 in / 142° |
+    /// | Side mouth / facing angle | 5–5⅛ in / 104° ± 1° | 5.0625 in / 104° |
+    /// | Corner / side shelf | 1–2¼ in / 0–⅜ in | 1.625 in / 0.1875 in |
+    /// | Cushion nose height | 62.5–64.5 % of ball diameter | 63.5 % |
+    ///
+    /// The cushion width (2 in) and the drop radii are modelling choices,
+    /// not WPA dimensions. All of these are starting values for calibration;
+    /// matching them is not a claim of conformity.
     pub const fn nine_foot() -> Self {
         let ball = BallSpec::standard();
         Self {
             playfield_length: 100.0 * INCH,
             playfield_width: 50.0 * INCH,
             ball,
-            corner_pocket_mouth: 4.5625 * INCH,
-            side_pocket_mouth: 5.0625 * INCH,
+            corner_pocket: PocketSpec {
+                mouth: 4.5625 * INCH,
+                facing_angle: 142.0 * DEGREE,
+                shelf: 1.625 * INCH,
+                drop_radius: 0.054,
+            },
+            side_pocket: PocketSpec {
+                mouth: 5.0625 * INCH,
+                facing_angle: 104.0 * DEGREE,
+                shelf: 0.1875 * INCH,
+                drop_radius: 0.058,
+            },
             cushion_nose_height: 0.635 * ball.diameter(),
+            cushion_width: 2.0 * INCH,
         }
     }
 
     /// Checks that every dimension is finite, positive and mutually coherent.
     pub fn validate(&self) -> Result<(), CoreError> {
+        let (c, sd) = (&self.corner_pocket, &self.side_pocket);
         let fields = [
             self.playfield_length,
             self.playfield_width,
             self.ball.radius,
             self.ball.mass,
-            self.corner_pocket_mouth,
-            self.side_pocket_mouth,
+            c.mouth,
+            c.facing_angle,
+            c.drop_radius,
+            sd.mouth,
+            sd.facing_angle,
+            sd.drop_radius,
             self.cushion_nose_height,
+            self.cushion_width,
         ];
         if !fields.iter().all(|v| v.is_finite() && *v > 0.0) {
             return Err(CoreError::InvalidTableSpec(
@@ -92,10 +123,26 @@ impl TableSpec {
                 "the playing surface must be longer than it is wide",
             ));
         }
+        if !(c.shelf.is_finite() && c.shelf >= 0.0 && sd.shelf.is_finite() && sd.shelf >= 0.0) {
+            return Err(CoreError::InvalidTableSpec(
+                "pocket shelves must be finite and non-negative",
+            ));
+        }
         let d = self.ball.diameter();
-        if self.corner_pocket_mouth <= d || self.side_pocket_mouth <= d {
+        if c.mouth <= d || sd.mouth <= d {
             return Err(CoreError::InvalidTableSpec(
                 "pocket mouths must be wider than a ball",
+            ));
+        }
+        let right = PI / 2.0;
+        if !(right..PI).contains(&c.facing_angle) || !(right..PI).contains(&sd.facing_angle) {
+            return Err(CoreError::InvalidTableSpec(
+                "pocket facings must make an angle in [90°, 180°) with the cushion",
+            ));
+        }
+        if c.drop_radius <= self.ball.radius || sd.drop_radius <= self.ball.radius {
+            return Err(CoreError::InvalidTableSpec(
+                "pocket drop regions must be larger than a ball",
             ));
         }
         if self.cushion_nose_height <= self.ball.radius || self.cushion_nose_height >= d {
@@ -187,7 +234,24 @@ mod tests {
                 ..ok
             },
             TableSpec {
-                corner_pocket_mouth: 0.01,
+                corner_pocket: PocketSpec {
+                    mouth: 0.01,
+                    ..ok.corner_pocket
+                },
+                ..ok
+            },
+            TableSpec {
+                side_pocket: PocketSpec {
+                    facing_angle: 0.5,
+                    ..ok.side_pocket
+                },
+                ..ok
+            },
+            TableSpec {
+                corner_pocket: PocketSpec {
+                    shelf: -0.01,
+                    ..ok.corner_pocket
+                },
                 ..ok
             },
             TableSpec {

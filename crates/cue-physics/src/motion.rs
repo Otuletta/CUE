@@ -73,6 +73,11 @@ impl Trajectory {
     pub(crate) fn reach(&self, t: f64) -> f64 {
         self.b.length() * t + self.a.length() * t * t
     }
+
+    /// Position after `t` seconds.
+    pub(crate) fn at(&self, t: f64) -> DVec2 {
+        self.c + self.b * t + self.a * t * t
+    }
 }
 
 pub(crate) fn trajectory(s: &BallState, k: &Kinematics) -> Trajectory {

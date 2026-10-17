@@ -82,12 +82,12 @@ events per break.
 |---|---|
 | Mouse: hover to aim, drag back and release | Verified in the browser |
 | Keyboard: arrows, Space, WASD, R, Esc | Verified natively |
-| Touch | **Needs a real device.** In Chromium mobile emulation, synthetic `PointerEvent`s report wrong `offsetX/Y` and carry no coalesced events, so they cannot validate touch. What *is* verified: winit receives the touch, and Bevy converts touch coordinates with exactly the same code it uses for the mouse. |
+| Touch | **Verified on a real phone** by the project author against the live demo (2026-10-18). Note: Chromium's mobile emulation cannot validate touch, because synthetic `PointerEvent`s report wrong `offsetX/Y` and carry no coalesced events. |
 | Portrait layout | Verified at 375 × 812: the camera rotates and the table fills the stage |
 
 ## Still to measure
 
-- Real mobile devices (Safari iOS, Chrome Android): touch, FPS and thermal behaviour.
+- Systematic mobile matrix (Safari iOS, Chrome Android): FPS and thermal behaviour over long sessions.
 - Firefox and Safari desktop.
 - Download and compile time over a throttled network with Brotli served.
 - Memory after repeated pause/resume cycles.

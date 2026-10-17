@@ -12,6 +12,7 @@
 const EVENTS = new Set([
   'ready',
   'shot-start',
+  'ball-pocketed',
   'shot-end',
   'paused',
   'resumed',

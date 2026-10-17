@@ -6,10 +6,7 @@
 
 use bevy::{prelude::*, render::view::Tonemapping, window::PrimaryWindow};
 
-use crate::{
-    scene::{CUSHION_WIDTH, RAIL_WIDTH},
-    sim::Simulation,
-};
+use crate::{scene::RAIL_WIDTH, sim::Simulation};
 
 /// Tilt away from straight down, radians.
 const TILT: f32 = 0.2;
@@ -47,7 +44,7 @@ pub(crate) fn fit_to_window(
     };
     let aspect = window.width() / window.height().max(1.0);
     let half =
-        sim.table().half_extents().as_vec2() + Vec2::splat(CUSHION_WIDTH + RAIL_WIDTH + MARGIN);
+        sim.world.geometry().outer_half_extents().as_vec2() + Vec2::splat(RAIL_WIDTH + MARGIN);
     let portrait = aspect < 1.0;
     let (across, up) = if portrait {
         (half.y, half.x)

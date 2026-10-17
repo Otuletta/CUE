@@ -10,7 +10,8 @@ use cue_core::{
     glam::{DVec2, DVec3},
 };
 use cue_physics::{
-    BallState, Motion, PhysicsProfile, SimError, SimEvent, SimEventKind, Strike, World,
+    BallState, Cushion, Motion, PhysicsProfile, Rail, SimError, SimEvent, SimEventKind,
+    SpeedFriction, Strike, World,
 };
 use proptest::prelude::*;
 
@@ -66,21 +67,39 @@ fn head_on_stun_shot_stops_the_cue_ball() {
     assert_relative_eq!(cue + object, normal_speed, epsilon = 1e-9);
 }
 
-#[test]
-fn stun_cut_obeys_the_ninety_degree_rule() {
-    let mut profile = PhysicsProfile::baseline();
-    profile.ball_ball.restitution = 1.0;
+/// Cue and object ball directions right after a half-ball stun hit.
+fn half_ball_stun(profile: PhysicsProfile) -> (DVec2, DVec2) {
     let r = profile.table.ball.radius;
-    // Half-ball hit: aim at a point one radius off the object's centre.
+    // Aim at a point one radius off the object's centre.
     let l = layout(&[(0, -0.4, 0.0), (1, 0.0, r)]);
     let mut w = World::new(profile, &l).unwrap();
     w.strike(Strike::centre(DVec2::X, 1.0)).unwrap();
     until_event(&mut w, is_ball_ball);
+    (
+        planar(w.state(BallId::CUE).unwrap().velocity),
+        planar(w.state(ball(1)).unwrap().velocity),
+    )
+}
 
-    let cue = planar(w.state(BallId::CUE).unwrap().velocity);
-    let object = planar(w.state(ball(1)).unwrap().velocity);
-    let angle = cue.angle_to(object).abs().to_degrees();
-    assert_relative_eq!(angle, 90.0, epsilon = 1e-6);
+#[test]
+fn stun_cut_obeys_the_ninety_degree_rule() {
+    // The textbook rule holds exactly for frictionless, perfectly elastic
+    // balls...
+    let mut ideal = PhysicsProfile::baseline();
+    ideal.ball_ball.restitution = 1.0;
+    ideal.ball_ball.friction = SpeedFriction::NONE;
+    let (cue, object) = half_ball_stun(ideal);
+    assert_relative_eq!(
+        cue.angle_to(object).abs().to_degrees(),
+        90.0,
+        epsilon = 1e-6
+    );
+
+    // ...and approximately for real ones: inelasticity and throw close the
+    // angle by a degree or two.
+    let (cue, object) = half_ball_stun(PhysicsProfile::baseline());
+    let real = cue.angle_to(object).abs().to_degrees();
+    assert!(real < 90.0 && real > 85.0, "separation angle {real}°");
 }
 
 #[test]
@@ -114,23 +133,31 @@ fn follow_carries_the_cue_ball_forward_and_draw_pulls_it_back() {
 }
 
 #[test]
-fn cushion_reverses_the_normal_component_with_restitution() {
+fn cushion_rebound_loses_speed_and_keeps_the_tangential_direction() {
+    // A stun shot into the foot rail at a shallow angle.
     let mut w = world(&[(0, 0.0, 0.0)]);
     w.strike(Strike::centre(DVec2::new(1.0, 0.2).normalize(), 0.6))
         .unwrap();
     loop {
         let t = w.next_event_time().unwrap();
         // Sampling at the event time gives the state just before resolution.
-        let incoming = w.sample(t).next().unwrap().1.velocity;
+        let incoming = w.sample(t).next().unwrap().1;
         w.advance_to(t).unwrap();
-        if w.drain_events()
-            .any(|e| matches!(e.kind, SimEventKind::Cushion { .. }))
-        {
-            let after = w.state(BallId::CUE).unwrap().velocity;
-            let e = w.profile().cushion.restitution;
-            assert!(incoming.x > 0.0, "the foot rail is reached first");
-            assert_relative_eq!(after.x, -e * incoming.x, epsilon = 1e-12);
-            assert_relative_eq!(after.z, incoming.z, epsilon = 1e-12);
+        let hit = w.drain_events().find_map(|e| match e.kind {
+            SimEventKind::Cushion { cushion, .. } => Some(cushion),
+            _ => None,
+        });
+        if let Some(cushion) = hit {
+            assert_eq!(cushion, Cushion::Rail(Rail::Foot));
+            let after = w.state(BallId::CUE).unwrap();
+            let ratio = -after.velocity.x / incoming.velocity.x;
+            // Han-style contact at nose height with e = 0.85: the horizontal
+            // rebound ratio lands between 0.6 and 0.85.
+            assert!(ratio > 0.6 && ratio < 0.85, "rebound ratio {ratio}");
+            assert!(after.velocity.z > 0.0, "keeps travelling along the rail");
+            // The contact above the equator gives the ball spin it did not
+            // have, so it leaves the cushion sliding.
+            assert_eq!(after.motion, Motion::Sliding);
             return;
         }
     }
@@ -217,7 +244,10 @@ fn break_moves_the_rack_and_settles() {
         .count();
     assert!(collisions > 15, "only {collisions} collisions");
     assert!(cushions > 4, "only {cushions} cushion contacts");
-    assert!(end.iter().all(|(_, s)| s.motion == Motion::Stationary));
+    assert!(
+        end.iter()
+            .all(|(_, s)| matches!(s.motion, Motion::Stationary | Motion::Pocketed))
+    );
 }
 
 proptest! {
@@ -250,22 +280,31 @@ proptest! {
     }
 }
 
-/// Spec §24.2 case 14: a thousand consecutive shots on one table, each taken
-/// from wherever the cue ball stopped. Slow in debug builds, so opt-in:
+/// Spec §24.2 case 14: a thousand consecutive shots, each taken from
+/// wherever the cue ball stopped. A scratched cue ball is re-spotted and an
+/// empty table re-racked, as in free play. Slow in debug builds, so opt-in:
 /// `cargo test -p cue-physics --release -- --ignored`.
 #[test]
 #[ignore = "stress test; run with --release -- --ignored"]
 fn a_thousand_consecutive_shots_stay_physical() {
     let table = TableSpec::nine_foot();
-    let mut w = World::new(
-        PhysicsProfile::baseline(),
-        &eight_ball_rack(&table, 1).unwrap(),
-    )
-    .unwrap();
+    let profile = PhysicsProfile::baseline();
+    let mut racks = 1u64;
+    let mut w = World::new(profile, &eight_ball_rack(&table, racks).unwrap()).unwrap();
     let mut rng = cue_core::SplitMix64::new(2026);
     let mut unit = move || rng.next_u64() as f64 / u64::MAX as f64;
-    let mut events = 0usize;
+    let (mut events, mut pocketed, mut simulated) = (0usize, 0usize, 0.0);
+    let started = std::time::Instant::now();
     for shot in 0..1000 {
+        if w.balls_in_play().all(|b| b.is_cue()) {
+            simulated += w.time();
+            racks += 1;
+            w = World::new(profile, &eight_ball_rack(&table, racks).unwrap()).unwrap();
+        }
+        if w.state(BallId::CUE).unwrap().motion == Motion::Pocketed {
+            let spot = w.nearest_free_spot(BallId::CUE, table.head_spot()).unwrap();
+            w.place(BallId::CUE, spot).unwrap();
+        }
         w.strike(Strike {
             direction: DVec2::from_angle(unit() * std::f64::consts::TAU),
             power: 0.05 + 0.95 * unit(),
@@ -281,6 +320,12 @@ fn a_thousand_consecutive_shots_stay_physical() {
             }
         }
         events += w.drain_events().count();
+        pocketed += w.take_report().unwrap().pocketed().count();
     }
-    eprintln!("1000 shots, {events} events, {:.1} s simulated", w.time());
+    simulated += w.time();
+    eprintln!(
+        "1000 shots, {racks} racks, {pocketed} balls pocketed, {events} events, \
+         {simulated:.0} s simulated in {:.0} ms",
+        started.elapsed().as_secs_f64() * 1e3
+    );
 }

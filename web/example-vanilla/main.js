@@ -75,9 +75,17 @@ $('play').addEventListener('click', async () => {
   record('engine version', game.version);
   log('ready');
 
-  for (const name of ['shot-start', 'shot-end', 'paused', 'resumed', 'destroyed']) {
+  for (const name of ['shot-start', 'paused', 'resumed', 'destroyed']) {
     game.on(name, () => log(name));
   }
+  game.on('ball-pocketed', ({ ballId, pocketId }) =>
+    log(`ball-pocketed ${ballId === 0 ? 'cue ball' : ballId} → ${pocketId}`),
+  );
+  game.on('shot-end', (shot) => {
+    if (shot?.abandoned) return log('shot-end (abandoned)');
+    const first = shot.firstContacts.join('+') || 'none';
+    log(`shot-end #${shot.shotId}: first contact ${first}, ${shot.pocketed.length} pocketed`);
+  });
   $('pause').disabled = false;
   $('rerack').disabled = false;
   $('destroy').disabled = false;

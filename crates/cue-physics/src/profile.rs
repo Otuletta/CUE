@@ -17,16 +17,46 @@ pub struct ClothParams {
 pub struct BallBallParams {
     /// Coefficient of restitution along the line of centres.
     pub restitution: f64,
-    /// Coefficient of friction between ball surfaces (drives throw).
-    pub friction: f64,
+    /// Friction between ball surfaces, which drives throw and spin transfer.
+    pub friction: SpeedFriction,
 }
 
-/// Ball–cushion interaction.
+/// A friction coefficient that falls with slip speed:
+/// `μ(v) = floor + extra · e^(−decay · v)`.
+///
+/// Phenolic balls grip more when they slide slowly against each other, which
+/// is why slow cut shots throw more than fast ones.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpeedFriction {
+    /// Coefficient at high slip speed.
+    pub floor: f64,
+    /// Additional coefficient at zero slip speed.
+    pub extra: f64,
+    /// Decay rate, s/m.
+    pub decay: f64,
+}
+
+impl SpeedFriction {
+    /// No friction at all.
+    pub const NONE: Self = Self {
+        floor: 0.0,
+        extra: 0.0,
+        decay: 0.0,
+    };
+
+    /// Coefficient at slip speed `v` (m/s).
+    pub fn at(&self, v: f64) -> f64 {
+        self.floor + self.extra * (-self.decay * v).exp()
+    }
+}
+
+/// Ball–cushion interaction. The contact height comes from
+/// [`TableSpec::cushion_nose_height`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CushionParams {
-    /// Coefficient of restitution normal to the cushion.
+    /// Coefficient of restitution along the contact normal.
     pub restitution: f64,
-    /// Coefficient of friction between ball and cushion rubber.
+    /// Coefficient of friction between ball and cushion cloth.
     pub friction: f64,
 }
 
@@ -36,6 +66,10 @@ pub struct CueParams {
     /// Cue-ball speed at full power, m/s. A hard amateur break is around
     /// 7–8 m/s; professionals exceed 10 m/s.
     pub max_speed: f64,
+    /// Effective mass of the shaft's tip end, kg. It sets **squirt**: the
+    /// lighter it is, the less a side-spin shot pushes the cue ball off the
+    /// aim line. Typical shafts are 5–10 g; low-deflection shafts are lighter.
+    pub shaft_endmass: f64,
 }
 
 /// A complete, versioned set of physical parameters.
@@ -61,15 +95,17 @@ pub struct PhysicsProfile {
 }
 
 impl PhysicsProfile {
-    /// Starting point for calibration.
+    /// The reference profile.
     ///
-    /// Values are the typical figures compiled by Dr. Dave Alciatore
-    /// (Colorado State University) in *Typical Physical Properties of Pool
-    /// Equipment*. They are uncalibrated against CUE's own reference shots;
-    /// Phase 2 replaces them with measured values and bumps the id.
+    /// Cloth, restitution and friction values are the typical figures
+    /// compiled by Dr. Dave Alciatore (Colorado State University) in *Typical
+    /// Physical Properties of Pool Equipment*. The ball–ball friction curve is
+    /// his fit to measured throw. Cushion values follow common practice for
+    /// the Han (2005) contact model. `docs/physics-model.md` lists the
+    /// reference behaviours this profile is checked against.
     pub const fn baseline() -> Self {
         Self {
-            id: "baseline-0",
+            id: "baseline-1",
             table: TableSpec::nine_foot(),
             cloth: ClothParams {
                 sliding_friction: 0.2,
@@ -79,13 +115,20 @@ impl PhysicsProfile {
             },
             ball_ball: BallBallParams {
                 restitution: 0.95,
-                friction: 0.06,
+                friction: SpeedFriction {
+                    floor: 9.951e-3,
+                    extra: 0.108,
+                    decay: 1.088,
+                },
             },
             cushion: CushionParams {
-                restitution: 0.75,
+                restitution: 0.85,
                 friction: 0.2,
             },
-            cue: CueParams { max_speed: 8.0 },
+            cue: CueParams {
+                max_speed: 8.0,
+                shaft_endmass: 0.007,
+            },
             gravity: 9.80665,
         }
     }

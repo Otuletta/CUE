@@ -12,7 +12,9 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 bevy.workspace = true
+cue-core.workspace = true
 cue-game.workspace = true
+cue-physics.workspace = true
 js-sys.workspace = true
 wasm-bindgen.workspace = true
 

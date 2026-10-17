@@ -1,22 +1,35 @@
 //! Table and ball meshes.
 //!
-//! Render geometry is derived from the simulation's [`TableSpec`] but is
-//! never used for collision: the solver has its own exact model.
+//! Cushions and rails are built from the outlines in the physics
+//! [`TableGeometry`](cue_physics::TableGeometry), so what you see lines up
+//! with what the balls bounce off. The meshes are still presentation only:
+//! the solver never reads them.
 
-use bevy::prelude::*;
-use cue_core::BallId;
+use bevy::{
+    asset::RenderAssetUsages,
+    mesh::{Indices, PrimitiveTopology},
+    prelude::*,
+};
+use cue_core::{BallId, glam::DVec2};
+use cue_physics::Cushion;
 
 use crate::{
     ball_texture,
     sim::{Ball, Simulation},
 };
 
-/// Width of the cushion rubber, metres.
-pub(crate) const CUSHION_WIDTH: f32 = 0.05;
 /// Width of the wooden rail outside the cushion, metres.
 pub(crate) const RAIL_WIDTH: f32 = 0.12;
 /// Height of the cushion top above the cloth, metres.
 const CUSHION_HEIGHT: f32 = 0.044;
+/// Height of the wooden rail top above the cloth, metres.
+const RAIL_HEIGHT: f32 = 0.05;
+/// Height of the pocket surround (the leather around the hole), metres.
+const POCKET_HEIGHT: f32 = 0.02;
+
+fn flat(p: DVec2) -> Vec2 {
+    p.as_vec2()
+}
 
 pub(crate) fn spawn_table(
     mut commands: Commands,
@@ -24,72 +37,99 @@ pub(crate) fn spawn_table(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let t = sim.table();
-    let (l, w) = (t.playfield_length as f32, t.playfield_width as f32);
-    let (cw, rw) = (CUSHION_WIDTH, RAIL_WIDTH);
+    let geometry = sim.world.geometry();
+    let outer = geometry.outer_half_extents().as_vec2();
+    let rim = outer + Vec2::splat(RAIL_WIDTH);
 
-    let cloth = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.06, 0.30, 0.24),
-        perceptual_roughness: 0.92,
-        reflectance: 0.2,
-        ..default()
-    });
-    let cushion = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.05, 0.25, 0.20),
-        perceptual_roughness: 0.9,
-        reflectance: 0.2,
-        ..default()
-    });
-    let wood = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.16, 0.09, 0.05),
-        perceptual_roughness: 0.45,
-        reflectance: 0.35,
+    let material =
+        |materials: &mut Assets<StandardMaterial>, rgb: (f32, f32, f32), roughness: f32| {
+            materials.add(StandardMaterial {
+                base_color: Color::srgb(rgb.0, rgb.1, rgb.2),
+                perceptual_roughness: roughness,
+                reflectance: 0.25,
+                ..default()
+            })
+        };
+    let cloth = material(&mut materials, (0.06, 0.30, 0.24), 0.92);
+    let cushion = material(&mut materials, (0.05, 0.25, 0.20), 0.9);
+    let wood = material(&mut materials, (0.16, 0.09, 0.05), 0.45);
+    let leather = material(&mut materials, (0.035, 0.03, 0.03), 0.7);
+    let hole = materials.add(StandardMaterial {
+        base_color: Color::BLACK,
+        unlit: true,
         ..default()
     });
 
-    let mut slab = |size: Vec3, at: Vec3, material: &Handle<StandardMaterial>| {
+    let mut spawn = |mesh: Mesh, material: &Handle<StandardMaterial>, at: Vec3| {
         commands.spawn((
-            Mesh3d(meshes.add(Cuboid::from_size(size))),
+            Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(material.clone()),
             Transform::from_translation(at),
         ));
     };
 
-    // Cloth: top surface at y = 0, extending under the cushions.
-    slab(
-        Vec3::new(l + 2.0 * cw, 0.03, w + 2.0 * cw),
-        Vec3::new(0.0, -0.015, 0.0),
+    // Cloth: top surface at y = 0, reaching under the cushions.
+    spawn(
+        Cuboid::new(2.0 * outer.x, 0.03, 2.0 * outer.y)
+            .mesh()
+            .build(),
         &cloth,
+        Vec3::new(0.0, -0.015, 0.0),
     );
 
-    // Cushions along each side of the playing surface.
-    let h = CUSHION_HEIGHT;
-    for side in [-1.0, 1.0] {
-        slab(
-            Vec3::new(l, h, cw),
-            Vec3::new(0.0, h / 2.0, side * (w + cw) / 2.0),
-            &cushion,
-        );
-        slab(
-            Vec3::new(cw, h, w),
-            Vec3::new(side * (l + cw) / 2.0, h / 2.0, 0.0),
-            &cushion,
-        );
+    for (outline, segment) in geometry.cushion_outlines().iter().zip(
+        geometry
+            .segments()
+            .iter()
+            .filter(|s| matches!(s.cushion, Cushion::Rail(_))),
+    ) {
+        // Cushion rubber, exactly over the collision outline.
+        let quad = outline.map(flat);
+        spawn(prism(&quad, 0.0, CUSHION_HEIGHT), &cushion, Vec3::ZERO);
+        // Wood behind it, from the back of the cushion to the rim.
+        let out = -flat(segment.normal) * RAIL_WIDTH;
+        let back = [quad[3], quad[2], quad[2] + out, quad[3] + out];
+        spawn(prism(&back, 0.0, RAIL_HEIGHT), &wood, Vec3::ZERO);
     }
 
-    // Wooden rails, slightly proud of the cushions.
-    let rh = h + 0.012;
-    let outer = Vec2::new(l + 2.0 * cw, w + 2.0 * cw);
-    for side in [-1.0, 1.0] {
-        slab(
-            Vec3::new(outer.x + 2.0 * rw, rh, rw),
-            Vec3::new(0.0, rh / 2.0 - 0.006, side * (outer.y + rw) / 2.0),
-            &wood,
-        );
-        slab(
-            Vec3::new(rw, rh, outer.y),
-            Vec3::new(side * (outer.x + rw) / 2.0, rh / 2.0 - 0.006, 0.0),
-            &wood,
+    // Pocket surrounds fill the gaps the rail sections leave, and a black
+    // disc marks the drop region.
+    for pocket in geometry.pockets() {
+        let ends: Vec<Vec2> = geometry
+            .segments()
+            .iter()
+            .filter(|s| s.cushion == Cushion::Jaw(pocket.id))
+            .map(|s| flat(s.b))
+            .collect();
+        let (sx, sz) = pocket.id.signs();
+        let (sx, sz) = (f32::from(sx), f32::from(sz));
+        let surround: Vec<Vec2> = if pocket.id.is_corner() {
+            // Long-rail facing end, out to the rim, round the corner, back in
+            // to the short-rail facing end.
+            vec![
+                ends[0],
+                Vec2::new(ends[0].x, sz * rim.y),
+                Vec2::new(sx * rim.x, sz * rim.y),
+                Vec2::new(sx * rim.x, ends[1].y),
+                ends[1],
+            ]
+        } else {
+            vec![
+                ends[0],
+                ends[1],
+                Vec2::new(ends[1].x, sz * rim.y),
+                Vec2::new(ends[0].x, sz * rim.y),
+            ]
+        };
+        spawn(prism(&surround, 0.0, POCKET_HEIGHT), &leather, Vec3::ZERO);
+        let centre = flat(pocket.centre);
+        spawn(
+            Cylinder::new(pocket.radius as f32, 0.001)
+                .mesh()
+                .resolution(48)
+                .build(),
+            &hole,
+            Vec3::new(centre.x, POCKET_HEIGHT + 0.0005, centre.y),
         );
     }
 
@@ -102,6 +142,50 @@ pub(crate) fn spawn_table(
         },
         Transform::from_xyz(0.4, 4.0, 1.2).looking_at(Vec3::ZERO, Vec3::Y),
     ));
+}
+
+/// A vertical prism over a convex outline on the table plane, from `bottom`
+/// to `top`. Flat-shaded; winding is fixed up from the geometry, so the
+/// outline may be given in either orientation.
+fn prism(outline: &[Vec2], bottom: f32, top: f32) -> Mesh {
+    let centre = outline.iter().copied().sum::<Vec2>() / outline.len() as f32;
+    let centre3 = Vec3::new(centre.x, (top + bottom) / 2.0, centre.y);
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut normals: Vec<[f32; 3]> = Vec::new();
+    // Each triangle is emitted so that its normal points away from the
+    // prism's centre.
+    let mut triangle = |a: Vec3, b: Vec3, c: Vec3| {
+        let mut n = (b - a).cross(c - a).normalize_or_zero();
+        let (b, c) = if n.dot((a + b + c) / 3.0 - centre3) < 0.0 {
+            n = -n;
+            (c, b)
+        } else {
+            (b, c)
+        };
+        for p in [a, b, c] {
+            positions.push(p.to_array());
+            normals.push(n.to_array());
+        }
+    };
+    let up = |p: Vec2| Vec3::new(p.x, top, p.y);
+    let down = |p: Vec2| Vec3::new(p.x, bottom, p.y);
+    for i in 1..outline.len() - 1 {
+        triangle(up(outline[0]), up(outline[i]), up(outline[i + 1]));
+    }
+    for i in 0..outline.len() {
+        let (p, q) = (outline[i], outline[(i + 1) % outline.len()]);
+        triangle(down(p), down(q), up(q));
+        triangle(down(p), up(q), up(p));
+    }
+    let count = positions.len() as u32;
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0f32, 0.0]; count as usize])
+    .with_inserted_indices(Indices::U32((0..count).collect()))
 }
 
 pub(crate) fn spawn_balls(

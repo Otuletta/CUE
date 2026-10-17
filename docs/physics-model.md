@@ -48,14 +48,18 @@ The next event is the earliest of:
 | Event | Found as |
 |---|---|
 | Regime change | the durations above |
-| Ball–cushion | first root of a quadratic (distance to the cushion line minus `R`) |
+| Ball–cushion segment | first root of a quadratic (distance to the segment's line minus `R`), accepted only if the contact point lies on the segment |
+| Ball–jaw point | first root of the quartic `|p(t) − v|² − R²` |
+| Ball into pocket | first root of the quartic `|p(t) − c|² − r²` (centre enters the drop region) |
 | Ball–ball | first root of the quartic `|pᵢ(t) − pⱼ(t)|² − (2R)²` |
 
 Roots are isolated rather than computed in closed form (`poly.rs`): the roots
 of `p′` split the window into monotonic intervals, and each interval with a
-sign change is bisected to machine precision. A contact that is already
-touching *and closing* is reported immediately, so rounding can never let two
-balls tunnel into each other.
+sign change is bisected to machine precision. Candidates are offered in time
+order to an acceptance test, so touching a cushion segment's *line* beyond its
+end is not a contact. A contact that is already touching *and closing* is
+reported immediately, so rounding can never let two balls tunnel into each
+other.
 
 Candidates are visited in a fixed order and only a strictly earlier one wins,
 so ties always resolve the same way. Pairs that cannot meet within the window
@@ -70,23 +74,81 @@ bit-for-bit, whether the game runs at 7, 30, 60 or 144 FPS or with irregular
 frame pacing. `break_outcome_is_identical_at_any_frame_rate` asserts exactly
 this on a full 16-ball break.
 
-## Collisions (Phase 1 models)
+## Table geometry
 
-**Ball–ball.** Equal masses, impulse along the line of centres with
-restitution `e`. Surfaces are frictionless for now, so spin passes through
-the collision unchanged. That is what produces **follow and draw**: after a
-head-on hit the cue ball keeps its spin and the cloth turns it into motion.
-It also gives the **90° rule** for stun cut shots, which is tested exactly
-with `e = 1`.
+`TableGeometry` (`geometry.rs`) derives the collision model from the
+`TableSpec`:
 
-**Ball–cushion.** The normal velocity reverses with restitution; spin is
-preserved, and the cloth realigns the ball afterwards.
+- **Six rail sections**, the cushion noses between pocket mouths.
+- **Twelve facings**, two per pocket. They run from each jaw point into the
+  rail at the WPA facing angle: 142° for corners, 104° for sides. Above 90°
+  the facings converge, so every throat is narrower than its mouth (corner
+  mouth 4.56 in, throat about 3.8 in).
+- **24 sharp vertices**: each jaw point and each facing end can be struck on
+  its own.
+- **Six drop regions.** A circle behind each mouth, set back by the WPA shelf
+  depth. A ball whose **centre** enters it falls.
+
+Construction refuses any geometry whose drop region does not cover the whole
+throat, so no ball can slip between the facings and leave the table. The
+same outlines drive the rendered cushions; the solver never reads meshes.
+
+## Contacts
+
+Both contact models follow one recipe (`impact.rs`). It keeps them simple to
+reason about and provably dissipative:
+
+1. Treat the ball(s) as **free spheres** and apply a Newton–Coulomb impulse
+   at the contact point: normal restitution `e`, and friction that either
+   stops the tangential slip (stick) or is capped at `μ` times the normal
+   impulse (slide). For spheres the contact normal passes through the
+   centre, so normal and tangential responses decouple and this step is
+   exact.
+2. **Let the slate absorb** any vertical velocity the impulse produced. The
+   ball stays on the cloth, and its spin keeps the full effect of the impulse.
+
+Step 1 cannot create energy for `e ≤ 1`, `μ ≥ 0`, and step 2 only removes
+it. Property tests check this over random states and also check momentum
+conservation in ball–ball impacts.
+
+**Ball–cushion (after Han, 2005).** The contact point is at the cushion nose
+height `h`, above the equator, at `θ = asin((h − R)/R)`, which is about 16°
+for a nose at 63.5 % of the ball's diameter. Consequences that the tests
+verify:
+
+- a perpendicular stun shot rebounds at about 0.7 of its speed;
+- a rolling ball loses topspin at the rail and leaves it sliding;
+- side spin changes the rebound angle through cushion friction.
+
+Han's paper parameterises the impulse by its normal component. Here friction
+opposes the *actual* slip of the contact point, which is equivalent for a
+free sphere and avoids assuming the slip direction.
+
+**Ball–ball with friction.** Equal masses, restitution along the line of
+centres, plus friction at the contact. The friction coefficient falls with
+slip speed, `μ(v) = 0.00995 + 0.108·e^(−1.088·v)` (Alciatore's fit to
+measured throw). This produces:
+
+- **Cut-induced throw.** A slow half-ball stun shot throws the object ball
+  1–6° off the line of centres, in the direction of the cue ball's path. Fast
+  shots throw less.
+- **Spin-induced throw.** Right english throws a straight shot to the left.
+- **Spin transfer**, from the same friction impulse.
+
+With the friction off and `e = 1`, the 90° rule holds exactly, and the tests
+assert it. With realistic values the separation angle is a degree or two
+smaller, as on a real table.
+
+**Follow and draw** emerge on their own: spin survives the collision, and the
+cloth turns it into motion.
 
 **Pressing contacts.** Friction can push two touching balls, or a ball and a
 cushion, into each other. With impulses alone this collapses into an
 unbounded sequence of ever-smaller bounces. Every contact therefore leaves a
 separating speed of at least **0.1 mm/s**. That bounds the cascade and adds
-about a nanojoule of energy.
+about a nanojoule of energy. Contacts below **1 mm/s** are simulated but left
+out of the `ShotReport`, so a ball nudging another or resting against a rail
+is never mistaken for a hit.
 
 ## Strike
 
@@ -95,37 +157,69 @@ The cue delivers a horizontal impulse `J = m·V·d̂` at the tip contact point
 half a radius (the miscue limit). Power `∈ (0, 1]` maps linearly to speed up
 to `CueParams::max_speed`; any perceptual curve belongs to the input layer.
 
+**Squirt.** Side spin pushes the cue ball off the cue's line, away from the
+side that was struck:
+
+```
+tan α = (5/2)·x·√(1 − x²) / (1 + m/mₑ + (5/2)·(1 − x²))
+```
+
+Here `x` is the side offset in radii and `mₑ` the shaft's effective endmass
+(Alciatore, TP A.31). With a 7 g endmass, half a tip of english squirts the
+ball about 2.3°.
+
+## Shot report
+
+When every ball has stopped, the world produces an immutable `ShotReport`
+(`cue-core`): a chronological list of ball contacts, cushion contacts and
+pocketings, with times relative to the strike. The rules (Phase 4) read only
+this. They can ask for the first ball contacted (all of them, when contacts
+are simultaneous within 1 ns), the balls pocketed and where, whether the cue
+ball scratched, whether any ball reached a cushion after first contact, and
+how many distinct object balls touched a cushion. That count is what the
+legal break needs.
+
 ## Parameters
 
-`PhysicsProfile::baseline()` (id `baseline-0`) uses the typical values compiled
-by Dr. Dave Alciatore. They are **uncalibrated** against CUE's own reference
-shots.
+`PhysicsProfile::baseline()` is id **`baseline-1`**. Any change to a value
+bumps the id, so a change in behaviour is always visible.
 
-| Parameter | Value |
+| Parameter | Value | Source |
+|---|---|---|
+| Sliding friction μs | 0.2 | Alciatore, typical |
+| Rolling resistance μr | 0.01 | Alciatore, typical |
+| Spinning friction μsp | 0.0117 (≈10 rad/s² spin decay) | Alciatore, typical |
+| Ball–ball restitution | 0.95 | Alciatore, typical |
+| Ball–ball friction | `0.00995 + 0.108·e^(−1.088 v)` | Alciatore, fit to measured throw |
+| Ball–cushion restitution | 0.85 | Common for the Han model |
+| Ball–cushion friction | 0.2 | Common for the Han model |
+| Cushion nose height | 63.5 % of ball diameter | WPA midpoint |
+| Max cue-ball speed | 8 m/s | Hard amateur break |
+| Shaft endmass | 7 g | Typical shaft |
+
+**Calibration status.** The profile is validated against the textbook and
+published behaviours listed above, which the test suite asserts. It has
+**not** been fitted to video of a real table. Until it is, the honest claim is
+*convincing game physics with the right qualitative and order-of-magnitude
+behaviour*, not a competitive-grade replica (spec §11.10).
+
+## Not modelled
+
+| Effect | Status |
 |---|---|
-| Sliding friction μs | 0.2 |
-| Rolling resistance μr | 0.01 |
-| Spinning friction μsp | 0.0117 (≈10 rad/s² spin decay) |
-| Ball–ball restitution | 0.95 |
-| Ball–cushion restitution | 0.75 |
-| Max cue-ball speed | 8 m/s |
-
-## Not modelled yet
-
-| Effect | Planned |
-|---|---|
-| Pockets and jaws | Phase 2 |
-| Cushion nose height and spin–cushion coupling (Han 2005) | Phase 2 |
-| Ball–ball friction: throw, spin transfer | Phase 2 |
-| Squirt / swerve (cue-ball deflection from side spin) | Phase 2, evaluated |
-| Jump and massé shots | Not committed for 1.0 |
+| Jump and massé shots (cue elevation, ball leaving the cloth) | Not committed for 1.0 |
+| Swerve (curve from side spin with an elevated cue) | Needs cue elevation; not committed |
+| Rounded jaw tips and rattling against pocket liners | Jaws are sharp; the drop region decides |
+| Ball–cushion "throw" from cushion compression time | Instantaneous impact |
+| Cloth wear, humidity, ball dirt | Out of scope |
 
 ## Performance
 
-On an Apple M4 Pro (native, release build), the 1,000-shot stress test
-processes **28,421 events in about 70 ms**, roughly 2.5 µs per event,
-including scheduling over all ball pairs. The test simulates two hours of play
-and runs with `--ignored`.
+On an Apple M4 Pro (native, release build), the 1,000-shot stress test runs
+**18,452 events in about 90 ms**. That includes four racks, 204 balls
+pocketed, scheduling against 18 cushion segments, 24 vertices, 6 pockets and
+every ball pair, and a full invariant check after every event. It simulates
+about 100 minutes of play.
 
 ## References
 
@@ -134,4 +228,6 @@ and runs with `--ignored`.
 - I. Han, *Dynamics in carom and three cushion billiards*, Journal of
   Mechanical Science and Technology, 2005.
 - D. Alciatore, *Typical Physical Properties of Pool Equipment* and technical
-  proofs, billiards.colostate.edu.
+  proofs (TP A.14 throw, TP A.31 squirt), billiards.colostate.edu.
+- World Pool-Billiard Association, *Equipment Specifications* (table, pocket
+  and cushion dimensions).

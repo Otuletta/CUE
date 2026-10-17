@@ -19,6 +19,8 @@
 
 #![warn(missing_docs)]
 
+mod geometry;
+mod impact;
 mod motion;
 mod poly;
 mod profile;
@@ -26,7 +28,10 @@ mod state;
 mod strike;
 mod world;
 
-pub use profile::{BallBallParams, ClothParams, CueParams, CushionParams, PhysicsProfile};
+pub use geometry::{Cushion, Pocket, Rail, Segment, TableGeometry, Vertex};
+pub use profile::{
+    BallBallParams, ClothParams, CueParams, CushionParams, PhysicsProfile, SpeedFriction,
+};
 pub use state::{BallState, Motion};
 pub use strike::{MAX_TIP_OFFSET, Strike};
-pub use world::{Rail, SimError, SimEvent, SimEventKind, World};
+pub use world::{SimError, SimEvent, SimEventKind, World};

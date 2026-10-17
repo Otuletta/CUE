@@ -12,8 +12,8 @@ CUE has two parts that ship together:
 - **A library** that other sites can embed with one call and a container
   element. Embedding it does not require knowing Rust or Bevy.
 
-> **Status: Phase 1, vertical slice.** You can aim and shoot a full rack on a
-> pocketless table, natively or in the browser. There are no pockets, rules or
+> **Status: Phase 2, billiards engine.** You can play free shots on a full
+> table with six pockets, natively or in the browser. There are no rules or
 > audio yet. This README describes only what exists; see the
 > [roadmap](#roadmap) for what comes next.
 
@@ -27,11 +27,24 @@ CUE has two parts that ship together:
 - **Verified textbook behaviour:** 5/7 rolling speed after a stun shot, natural
   roll at a tip height of 2R/5, the 90° rule, follow and draw, and the rolling
   stopping distance.
+- **Real table behaviour:**
+  - Cushions respond at nose height (after Han, 2005), so side spin changes
+    rebound angles and rails take topspin off.
+  - Balls throw each other and transfer spin.
+  - Side spin squirts the cue ball.
+  - Pockets follow the WPA facing angles and shelf depths: a ball frozen to
+    the rail drops in the corner, a shot at the point bounces out, and side
+    pockets reject shallow angles. See [ADR-0007](docs/adr/0007-cushion-and-pocket-model.md).
+- **Shot reports:** every shot produces an immutable `ShotReport` for the
+  rules. It records first contact, pocketed balls, scratches and cushion
+  contacts.
 - **Browser build:** ≈ 4.1 MiB Brotli (6.7 MiB gzip as GitHub Pages serves it), 120 FPS on the reference desktop,
   first frame under a second after clicking Play. Pausing stops the engine
   completely (0 frames). See the [measurements](docs/benchmarks/phase-1-web.md).
 - **Embedding API:** `createCue({ container })` with `on`, `pause`, `resume`,
-  `rerack` and `destroy`. The vanilla example uses no framework.
+  `rerack` and `destroy`. Events: `ready`, `shot-start`, `ball-pocketed`,
+  `shot-end` (with a shot summary), `paused`, `resumed`, `destroyed`. The
+  vanilla example uses no framework.
 
 ## Why it is built this way
 
@@ -51,8 +64,8 @@ host page ──▶ cue-web ──▶ cue-game ──▶ cue-physics ──▶ c
 
 | Crate | Responsibility | Depends on Bevy? |
 |-------|----------------|:----------------:|
-| [`cue-core`](crates/cue-core) | Ball identity, table geometry, racks, deterministic RNG; later rulesets and shot reports | no |
-| [`cue-physics`](crates/cue-physics) | Event-driven solver: motion regimes, collision detection and response, strikes, versioned profiles | no |
+| [`cue-core`](crates/cue-core) | Ball and pocket identity, WPA table spec, racks, deterministic RNG, `ShotReport`; later rulesets | no |
+| [`cue-physics`](crates/cue-physics) | Event-driven solver: motion regimes, cushion and pocket geometry, contact models, strikes, versioned profiles | no |
 | [`cue-game`](crates/cue-game) | Bevy app: scene, procedural ball textures, aiming, camera, HUD | yes |
 | [`cue-web`](crates/cue-web) | WASM boundary: mount, pause/resume, destroy, events | yes |
 | [`web/package`](web/package) | `createCue()` ES module wrapper, the only API host pages use | — |
@@ -95,8 +108,8 @@ cancel.
 | Phase | Goal | Exit criterion |
 |-------|------|----------------|
 | 0 ✓ | Skeleton, CI, first ADRs | `cargo check` and `cargo test` pass on a clean install |
-| **1** | Vertical slice in the browser | A simple table with a controllable shot in WASM, plus real size and FPS measurements |
-| 2 | Billiards engine | Critical physics cases pass; the solver produces a `ShotReport` |
+| 1 ✓ | Vertical slice in the browser | A simple table with a controllable shot in WASM, plus real size and FPS measurements |
+| **2** | Billiards engine | Critical physics cases pass; the solver produces a `ShotReport` |
 | 3 | Free Play | A first-time visitor can shoot, understand the result, reset and leave |
 | 4 | Local eight-ball | Every rule transition in scope is covered by tests |
 | 5 | Visuals, audio, polish | Approved on the device matrix with no physics regressions |

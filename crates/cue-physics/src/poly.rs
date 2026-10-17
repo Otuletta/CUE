@@ -82,6 +82,19 @@ impl Poly {
     /// For a genuine crossing the returned time is on the positive side, i.e.
     /// just before contact.
     pub(crate) fn first_falling_root(&self, lo: f64, hi: f64) -> Option<f64> {
+        self.first_contact(lo, hi, |_| true)
+    }
+
+    /// Like [`first_falling_root`](Self::first_falling_root), but each
+    /// candidate is offered to `accept` in time order and only accepted
+    /// candidates count. Used for finite cushion segments, where touching the
+    /// infinite line outside the segment is not a contact.
+    pub(crate) fn first_contact(
+        &self,
+        lo: f64,
+        hi: f64,
+        accept: impl Fn(f64) -> bool,
+    ) -> Option<f64> {
         if lo.is_nan() || hi.is_nan() || lo > hi {
             return None;
         }
@@ -94,9 +107,11 @@ impl Poly {
             if a < b {
                 let (fa, fb) = (self.eval(a), self.eval(b));
                 if fa > 0.0 && fb <= 0.0 {
-                    return Some(self.bisect(a, b));
-                }
-                if fa <= 0.0 && fb < fa {
+                    let t = self.bisect(a, b);
+                    if accept(t) {
+                        return Some(t);
+                    }
+                } else if fa <= 0.0 && fb < fa && accept(a) {
                     return Some(a);
                 }
             }
@@ -224,6 +239,15 @@ mod tests {
         let p = Poly::new(&[-1e-19, 1e-10, -0.1]);
         let t = p.first_falling_root(0.0, 1.0).unwrap();
         assert_relative_eq!(t, 5e-10, epsilon = 1e-15);
+    }
+
+    #[test]
+    fn rejected_candidates_fall_through_to_later_ones() {
+        // Two downward crossings, at 1 and 3; reject the first.
+        let p = from_roots(&[1.0, 2.0, 3.0, 4.0]);
+        let t = p.first_contact(0.0, 10.0, |t| t > 2.0).unwrap();
+        assert_relative_eq!(t, 3.0, epsilon = 1e-12);
+        assert_eq!(p.first_contact(0.0, 10.0, |_| false), None);
     }
 
     #[test]
