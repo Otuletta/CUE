@@ -50,6 +50,11 @@ jobs:
           name: cue-web-dist
           path: web/dist
           retention-days: 14
+      - name: Package for GitHub Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
 
   deny:
     name: licenses · advisories · sources
@@ -57,3 +62,23 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  # Publishes the example host at https://otuletta.github.io/CUE/.
+  # Runs only for main, and only when every other job is green.
+  pages:
+    name: deploy demo
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [rust, wasm, deny]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

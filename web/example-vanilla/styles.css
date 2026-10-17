@@ -78,6 +78,18 @@ main {
   display: none;
 }
 
+.hint {
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.hint strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+
 .controls {
   display: flex;
   gap: 0.5rem;
