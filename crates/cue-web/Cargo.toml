@@ -1,0 +1,18 @@
+[package]
+name = "cue-web"
+description = "WebAssembly bridge for CUE: mounting, lifecycle and events for host pages."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cue-game.workspace = true
+wasm-bindgen.workspace = true
+
+[lints]
+workspace = true

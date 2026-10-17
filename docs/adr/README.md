@@ -1,0 +1,31 @@
+# Architecture Decision Records
+
+Each significant decision lives in its own numbered file. Records are never
+edited silently: a reversed decision gets a new ADR that supersedes the old
+one.
+
+| ADR | Decision | Status |
+|-----|----------|--------|
+| [0001](0001-rust-and-bevy.md) | Rust and Bevy | accepted |
+| [0002](0002-custom-billiards-solver.md) | Purpose-built billiards solver instead of Rapier | accepted |
+| [0003](0003-wasm-and-webgl2.md) | WebAssembly with WebGL2 first | accepted, pending measurements |
+| [0004](0004-no-backend.md) | No backend | accepted |
+
+Open decisions (camera, integration strategy, power mechanic, call-shot UI, and
+others) are listed in §31 of the [specification](../specification.es.md) and
+get an ADR when they are resolved.
+
+## Template
+
+```markdown
+# ADR-XXXX — Title
+
+- **Status:** proposed | accepted | superseded by ADR-YYYY
+- **Date:** YYYY-MM-DD
+
+## Context
+## Decision
+## Consequences
+## Evidence
+## Review conditions
+```

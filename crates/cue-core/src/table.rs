@@ -1,0 +1,219 @@
+use glam::DVec2;
+
+use crate::CoreError;
+
+/// Metres per inch, exact by definition.
+const INCH: f64 = 0.0254;
+
+/// Physical description of a ball.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BallSpec {
+    /// Radius in metres.
+    pub radius: f64,
+    /// Mass in kilograms.
+    pub mass: f64,
+}
+
+impl BallSpec {
+    /// A standard pool ball: 2¼ in diameter, 6 oz.
+    ///
+    /// The WPA allows 5½–6 oz; mass is a calibration parameter, not a rule.
+    pub const fn standard() -> Self {
+        Self {
+            radius: 2.25 * INCH / 2.0,
+            mass: 0.170,
+        }
+    }
+
+    /// Diameter in metres.
+    pub const fn diameter(&self) -> f64 {
+        self.radius * 2.0
+    }
+}
+
+/// Geometry of a pool table as seen by the simulation.
+///
+/// Dimensions describe the *playing surface*: the area bounded by the cushion
+/// noses. Rendering geometry (rails, frame, legs) is a separate concern and
+/// must never be used for collision.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TableSpec {
+    /// Length of the playing surface along `X`, in metres.
+    pub playfield_length: f64,
+    /// Width of the playing surface along `Z`, in metres.
+    pub playfield_width: f64,
+    /// The balls played on this table.
+    pub ball: BallSpec,
+    /// Corner pocket mouth, measured between the cushion noses, in metres.
+    pub corner_pocket_mouth: f64,
+    /// Side pocket mouth, measured between the cushion noses, in metres.
+    pub side_pocket_mouth: f64,
+    /// Height of the cushion nose above the cloth, in metres.
+    pub cushion_nose_height: f64,
+}
+
+impl TableSpec {
+    /// A 9-foot table using the midpoints of the WPA equipment tolerances.
+    ///
+    /// Playing surface 100 × 50 in; corner mouth 4½–4⅝ in; side mouth
+    /// 5–5⅛ in; cushion nose at 62.5–64.5 % of the ball diameter. These are
+    /// starting values for calibration, to be checked against the adopted
+    /// specification before any claim of conformity.
+    pub const fn nine_foot() -> Self {
+        let ball = BallSpec::standard();
+        Self {
+            playfield_length: 100.0 * INCH,
+            playfield_width: 50.0 * INCH,
+            ball,
+            corner_pocket_mouth: 4.5625 * INCH,
+            side_pocket_mouth: 5.0625 * INCH,
+            cushion_nose_height: 0.635 * ball.diameter(),
+        }
+    }
+
+    /// Checks that every dimension is finite, positive and mutually coherent.
+    pub fn validate(&self) -> Result<(), CoreError> {
+        let fields = [
+            self.playfield_length,
+            self.playfield_width,
+            self.ball.radius,
+            self.ball.mass,
+            self.corner_pocket_mouth,
+            self.side_pocket_mouth,
+            self.cushion_nose_height,
+        ];
+        if !fields.iter().all(|v| v.is_finite() && *v > 0.0) {
+            return Err(CoreError::InvalidTableSpec(
+                "all dimensions must be finite and positive",
+            ));
+        }
+        if self.playfield_width > self.playfield_length {
+            return Err(CoreError::InvalidTableSpec(
+                "the playing surface must be longer than it is wide",
+            ));
+        }
+        let d = self.ball.diameter();
+        if self.corner_pocket_mouth <= d || self.side_pocket_mouth <= d {
+            return Err(CoreError::InvalidTableSpec(
+                "pocket mouths must be wider than a ball",
+            ));
+        }
+        if self.cushion_nose_height <= self.ball.radius || self.cushion_nose_height >= d {
+            return Err(CoreError::InvalidTableSpec(
+                "cushion nose must sit between the ball's equator and its top",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Half extents of the playing surface on the table plane.
+    pub fn half_extents(&self) -> DVec2 {
+        DVec2::new(self.playfield_length, self.playfield_width) / 2.0
+    }
+
+    /// The foot spot, where the apex ball of the rack is placed.
+    pub fn foot_spot(&self) -> DVec2 {
+        DVec2::new(self.playfield_length / 4.0, 0.0)
+    }
+
+    /// The head spot, the default cue-ball position for the break.
+    pub fn head_spot(&self) -> DVec2 {
+        DVec2::new(self.head_string_x(), 0.0)
+    }
+
+    /// `X` coordinate of the head string. The break is taken from behind it.
+    pub fn head_string_x(&self) -> f64 {
+        -self.playfield_length / 4.0
+    }
+
+    /// Whether a ball centred at `p` lies fully on the playing surface,
+    /// without overlapping any cushion nose.
+    pub fn contains_ball(&self, p: DVec2) -> bool {
+        let limit = self.half_extents() - DVec2::splat(self.ball.radius);
+        p.is_finite() && p.x.abs() <= limit.x && p.y.abs() <= limit.y
+    }
+}
+
+impl Default for TableSpec {
+    fn default() -> Self {
+        Self::nine_foot()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use approx::assert_relative_eq;
+
+    use super::*;
+
+    #[test]
+    fn nine_foot_table_is_valid_and_two_to_one() {
+        let t = TableSpec::nine_foot();
+        assert_eq!(t.validate(), Ok(()));
+        assert_relative_eq!(t.playfield_length, 2.54);
+        assert_relative_eq!(t.playfield_width, 1.27);
+        assert_relative_eq!(t.playfield_length / t.playfield_width, 2.0);
+    }
+
+    #[test]
+    fn standard_ball_matches_spec() {
+        let b = BallSpec::standard();
+        assert_relative_eq!(b.diameter(), 0.05715);
+        assert_relative_eq!(b.radius, 0.028575);
+    }
+
+    #[test]
+    fn spots_sit_on_the_long_axis_quarters() {
+        let t = TableSpec::nine_foot();
+        assert_relative_eq!(t.foot_spot().x, 0.635);
+        assert_relative_eq!(t.head_spot().x, -0.635);
+        assert_relative_eq!(t.foot_spot().y, 0.0);
+    }
+
+    #[test]
+    fn rejects_degenerate_specs() {
+        let ok = TableSpec::nine_foot();
+        let cases = [
+            TableSpec {
+                playfield_length: 0.0,
+                ..ok
+            },
+            TableSpec {
+                playfield_width: f64::NAN,
+                ..ok
+            },
+            TableSpec {
+                playfield_width: 3.0,
+                ..ok
+            },
+            TableSpec {
+                corner_pocket_mouth: 0.01,
+                ..ok
+            },
+            TableSpec {
+                cushion_nose_height: 0.01,
+                ..ok
+            },
+            TableSpec {
+                ball: BallSpec {
+                    mass: -1.0,
+                    ..ok.ball
+                },
+                ..ok
+            },
+        ];
+        for spec in cases {
+            assert!(spec.validate().is_err(), "{spec:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn contains_ball_respects_radius_and_rejects_nan() {
+        let t = TableSpec::nine_foot();
+        let edge = t.half_extents() - DVec2::splat(t.ball.radius);
+        assert!(t.contains_ball(DVec2::ZERO));
+        assert!(t.contains_ball(edge));
+        assert!(!t.contains_ball(edge + DVec2::new(1e-6, 0.0)));
+        assert!(!t.contains_ball(DVec2::new(f64::NAN, 0.0)));
+    }
+}

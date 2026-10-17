@@ -1,0 +1,17 @@
+[package]
+name = "cue-game"
+description = "Bevy application for CUE: scene, input, camera, audio and presentation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+cue-core.workspace = true
+cue-physics.workspace = true
+# Feature set is trimmed in Phase 1 once a real WASM build can be measured.
+bevy.workspace = true
+
+[lints]
+workspace = true

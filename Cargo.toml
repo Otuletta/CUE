@@ -1,0 +1,65 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Otuletta/CUE"
+publish = false
+
+[workspace.dependencies]
+# Internal crates
+cue-core = { path = "crates/cue-core" }
+cue-physics = { path = "crates/cue-physics" }
+cue-game = { path = "crates/cue-game" }
+
+# Math: pinned to the glam line Bevy 0.20 uses, so physics state converts to
+# render transforms without a second math library in the binary.
+glam = { version = "0.33.2", default-features = false, features = ["std", "f64"] }
+
+# Engine
+bevy = "0.20.0"
+
+# Support
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+wasm-bindgen = "0.2.129"
+
+# Testing
+approx = "0.5.1"
+proptest = "1.12.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+float_cmp = "warn"
+cast_lossless = "warn"
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
+# Bevy is very slow when unoptimised. Optimise dependencies even in dev,
+# keep our own code at a debuggable level.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# Web release: size over speed; tuned once real numbers exist (Phase 1).
+[profile.web-release]
+inherits = "release"
+opt-level = "s"
+strip = "debuginfo"
+panic = "abort"
