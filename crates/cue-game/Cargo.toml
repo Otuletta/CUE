@@ -10,8 +10,43 @@ publish.workspace = true
 [dependencies]
 cue-core.workspace = true
 cue-physics.workspace = true
-# Feature set is trimmed in Phase 1 once a real WASM build can be measured.
-bevy.workspace = true
+# Only what CUE uses. Notably absent: audio (arrives with its own measurement),
+# glTF, scenes, animation, picking, sprites, gamepads and the tonemapping LUTs
+# (the camera uses a LUT-free operator), which also drops the zstd/KTX2 stack.
+bevy = { workspace = true, features = [
+    "std",
+    "async_executor",
+    "multi_threaded",
+    "bevy_asset",
+    "bevy_log",
+    "bevy_window",
+    "bevy_winit",
+    "x11",
+    "webgl2",
+    "keyboard",
+    "mouse",
+    "touch",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_camera",
+    "bevy_light",
+    "bevy_pbr",
+    "bevy_mesh",
+    "bevy_material",
+    "bevy_shader",
+    "bevy_image",
+    "bevy_color",
+    "bevy_gizmos",
+    "bevy_gizmos_render",
+    "bevy_ui",
+    "bevy_ui_render",
+    "bevy_text",
+    "default_font",
+] }
+
+[dev-dependencies]
+# The sandbox saves PNG screenshots; never part of the web build.
+bevy = { workspace = true, features = ["png"] }
 
 [lints]
 workspace = true

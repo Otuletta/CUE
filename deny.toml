@@ -7,16 +7,9 @@ all-features = false
 [advisories]
 version = 2
 yanked = "deny"
-# Each ignore states why it does not affect CUE and when it goes away.
-ignore = [
-    # ruzstd 0.8 (zstd decoder, DoS on crafted input) via bevy_image's KTX2
-    # support. CUE only decodes its own bundled assets, never user uploads.
-    # Removed once Phase 1 trims Bevy features (zstd/ktx2) or Bevy bumps it.
-    { id = "RUSTSEC-2026-0344", reason = "only trusted bundled assets are decoded; drop with Bevy feature trimming" },
-    # ttf-parser unmaintained, via winit's Linux Wayland window decorations.
-    # Not present in the web build.
-    { id = "RUSTSEC-2026-0192", reason = "native Linux decorations only; not in the WASM artefact" },
-]
+# No ignores. Any future entry must state why it does not affect CUE and
+# when it will be removed.
+ignore = []
 
 [licenses]
 version = 2

@@ -10,8 +10,26 @@ CUE has two parts that ship together:
 - **A library** that other sites can embed with one call and a container
   element. Embedding it does not require knowing Rust or Bevy.
 
-> **Status: Phase 0, project skeleton.** Nothing is playable yet. This README
-> describes only what exists; see the [roadmap](#roadmap) for what comes next.
+> **Status: Phase 1, vertical slice.** You can aim and shoot a full rack on a
+> pocketless table, natively or in the browser. There are no pockets, rules or
+> audio yet. This README describes only what exists; see the
+> [roadmap](#roadmap) for what comes next.
+
+## What works today
+
+- **Event-driven physics.** Sliding, rolling and spin decay are closed-form.
+  Collisions are found analytically, so nothing tunnels. A shot is
+  **bit-for-bit identical at any frame rate**, which the test suite asserts on a
+  full break played at 7, 30, 60 and 144 FPS. See the
+  [physics model](docs/physics-model.md).
+- **Verified textbook behaviour:** 5/7 rolling speed after a stun shot, natural
+  roll at a tip height of 2R/5, the 90° rule, follow and draw, and the rolling
+  stopping distance.
+- **Browser build:** ≈ 4.1 MiB Brotli, 120 FPS on the reference desktop,
+  first frame under a second after clicking Play. Pausing stops the engine
+  completely (0 frames). See the [measurements](docs/benchmarks/phase-1-web.md).
+- **Embedding API:** `createCue({ container })` with `on`, `pause`, `resume`,
+  `rerack` and `destroy`. The vanilla example uses no framework.
 
 ## Why it is built this way
 
@@ -32,9 +50,10 @@ host page ──▶ cue-web ──▶ cue-game ──▶ cue-physics ──▶ c
 | Crate | Responsibility | Depends on Bevy? |
 |-------|----------------|:----------------:|
 | [`cue-core`](crates/cue-core) | Ball identity, table geometry, racks, deterministic RNG; later rulesets and shot reports | no |
-| [`cue-physics`](crates/cue-physics) | Ball state, motion regimes, versioned physical profiles; later the solver | no |
-| [`cue-game`](crates/cue-game) | Bevy app: scene, input, camera, audio, presentation | yes |
-| [`cue-web`](crates/cue-web) | WASM boundary: mount, lifecycle, events | yes |
+| [`cue-physics`](crates/cue-physics) | Event-driven solver: motion regimes, collision detection and response, strikes, versioned profiles | no |
+| [`cue-game`](crates/cue-game) | Bevy app: scene, procedural ball textures, aiming, camera, HUD | yes |
+| [`cue-web`](crates/cue-web) | WASM boundary: mount, pause/resume, destroy, events | yes |
+| [`web/package`](web/package) | `createCue()` ES module wrapper, the only API host pages use | — |
 
 Units are SI. The origin is the centre of the playing surface, `+X` points
 towards the foot rail and `+Y` points up.
@@ -47,17 +66,34 @@ automatically on first use.
 
 ```bash
 cargo test --workspace                              # all tests
-cargo run -p cue-game --example sandbox             # native window with a racked table
+cargo test -p cue-physics --release -- --ignored    # 1,000-shot stress test
+cargo run -p cue-game --example sandbox             # play natively
 cargo fmt --all -- --check                          # formatting
 cargo clippy --workspace --all-targets -- -D warnings
 ```
+
+### Browser build
+
+You also need the `wasm-bindgen` CLI at the exact version in `Cargo.lock`
+(the build script checks it), and Node.js for the size report.
+
+```bash
+cargo install wasm-bindgen-cli --version 0.2.129 --locked
+scripts/build-web.sh                                # → web/dist
+python3 scripts/serve.py                            # http://127.0.0.1:8765
+```
+
+**Controls:** move the pointer to aim, then press, drag back and release to
+shoot (a release with almost no pull cancels). Keyboard: ←/→ aim (Shift for
+fine), ↑/↓ power, Space shoot, W/A/S/D spin, C centre the tip, R re-rack, Esc
+cancel.
 
 ## Roadmap
 
 | Phase | Goal | Exit criterion |
 |-------|------|----------------|
-| **0** | Skeleton, CI, first ADRs | `cargo check` and `cargo test` pass on a clean install |
-| 1 | Vertical slice in the browser | A simple table with a controllable shot in WASM, plus real size and FPS measurements |
+| 0 ✓ | Skeleton, CI, first ADRs | `cargo check` and `cargo test` pass on a clean install |
+| **1** | Vertical slice in the browser | A simple table with a controllable shot in WASM, plus real size and FPS measurements |
 | 2 | Billiards engine | Critical physics cases pass; the solver produces a `ShotReport` |
 | 3 | Free Play | A first-time visitor can shoot, understand the result, reset and leave |
 | 4 | Local eight-ball | Every rule transition in scope is covered by tests |

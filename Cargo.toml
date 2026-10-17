@@ -20,13 +20,15 @@ cue-game = { path = "crates/cue-game" }
 # render transforms without a second math library in the binary.
 glam = { version = "0.33.2", default-features = false, features = ["std", "f64"] }
 
-# Engine
-bevy = "0.20.0"
+# Engine. Default features are off; each crate opts into what it uses so the
+# WASM bundle carries no unused subsystems (docs/benchmarks/phase-1-web.md).
+bevy = { version = "0.20.0", default-features = false }
 
 # Support
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
 wasm-bindgen = "0.2.129"
+js-sys = "0.3.106"
 
 # Testing
 approx = "0.5.1"
@@ -57,9 +59,11 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 
-# Web release: size over speed; tuned once real numbers exist (Phase 1).
+# Web release: size over speed. Each setting is justified by the measurements
+# in docs/benchmarks/phase-1-web.md.
 [profile.web-release]
 inherits = "release"
 opt-level = "s"
-strip = "debuginfo"
+lto = "fat"
+strip = true
 panic = "abort"

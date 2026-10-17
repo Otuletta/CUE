@@ -1,21 +1,32 @@
 //! # cue-physics
 //!
-//! A purpose-built billiards solver. It does not use a general rigid-body
-//! engine: pool balls are spheres on a plane, and the phenomena that make
-//! billiards feel right (sliding that turns into rolling, cloth resistance,
-//! side spin, cushion rebound at nose height) have well-studied closed-form
+//! A purpose-built, event-driven billiards solver. It does not use a general
+//! rigid-body engine: pool balls are spheres on a plane, and the phenomena
+//! that make billiards feel right (sliding that turns into rolling, cloth
+//! resistance, side spin, cushion rebound) have well-studied closed-form
 //! models that a generic contact solver only approximates.
 //!
-//! See `docs/adr/0002-custom-billiards-solver.md` for the rationale and
-//! `docs/physics-model.md` (Phase 2) for the equations and their sources.
+//! Between events each ball follows an exact trajectory (see `motion`).
+//! Events — collisions, cushion contacts, regime changes — are found as the
+//! roots of low-degree polynomials (see `poly`) and resolved one at a time in
+//! a fixed order. The result does not depend on the frame rate, and the same
+//! inputs always produce the same shot.
 //!
-//! The crate depends only on `cue-core`. It never touches Bevy, the GPU or the
-//! browser, so every physical behaviour can be tested natively.
+//! See `docs/adr/0002-custom-billiards-solver.md` for the rationale.
+//!
+//! The crate depends only on `cue-core`. It never touches Bevy, the GPU or
+//! the browser, so every physical behaviour is tested natively.
 
 #![warn(missing_docs)]
 
+mod motion;
+mod poly;
 mod profile;
 mod state;
+mod strike;
+mod world;
 
-pub use profile::{BallBallParams, ClothParams, CushionParams, PhysicsProfile};
+pub use profile::{BallBallParams, ClothParams, CueParams, CushionParams, PhysicsProfile};
 pub use state::{BallState, Motion};
+pub use strike::{MAX_TIP_OFFSET, Strike};
+pub use world::{Rail, SimError, SimEvent, SimEventKind, World};

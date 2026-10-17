@@ -11,7 +11,9 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+bevy.workspace = true
 cue-game.workspace = true
+js-sys.workspace = true
 wasm-bindgen.workspace = true
 
 [lints]

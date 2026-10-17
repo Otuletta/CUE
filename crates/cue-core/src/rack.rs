@@ -47,6 +47,17 @@ impl Layout {
     }
 }
 
+/// Builds a custom layout (practice drills, tests, future challenges). If an
+/// id repeats, the last position wins. Validity is checked by consumers such
+/// as the physics world, not here.
+impl FromIterator<(BallId, DVec2)> for Layout {
+    fn from_iter<I: IntoIterator<Item = (BallId, DVec2)>>(iter: I) -> Self {
+        Self {
+            positions: iter.into_iter().collect(),
+        }
+    }
+}
+
 /// Slot `(row, index)` of the eight ball: centre of the third row.
 const EIGHT_SLOT: (usize, usize) = (2, 1);
 /// Back corners of the triangle; they must hold one solid and one stripe.

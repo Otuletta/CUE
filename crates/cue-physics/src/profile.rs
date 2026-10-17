@@ -30,6 +30,14 @@ pub struct CushionParams {
     pub friction: f64,
 }
 
+/// Cue delivery.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CueParams {
+    /// Cue-ball speed at full power, m/s. A hard amateur break is around
+    /// 7–8 m/s; professionals exceed 10 m/s.
+    pub max_speed: f64,
+}
+
 /// A complete, versioned set of physical parameters.
 ///
 /// Every simulated shot records the profile id it ran with, so a change in
@@ -46,6 +54,8 @@ pub struct PhysicsProfile {
     pub ball_ball: BallBallParams,
     /// Ball–cushion parameters.
     pub cushion: CushionParams,
+    /// Cue delivery.
+    pub cue: CueParams,
     /// Gravitational acceleration, m/s².
     pub gravity: f64,
 }
@@ -75,6 +85,7 @@ impl PhysicsProfile {
                 restitution: 0.75,
                 friction: 0.2,
             },
+            cue: CueParams { max_speed: 8.0 },
             gravity: 9.80665,
         }
     }

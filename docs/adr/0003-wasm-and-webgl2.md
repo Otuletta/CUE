@@ -1,6 +1,6 @@
 # ADR-0003 — WebAssembly with WebGL2 first
 
-- **Status:** accepted, pending Phase 1 measurements
+- **Status:** accepted; Phase 1 measurements recorded
 - **Date:** 2026-10-17
 
 ## Context
@@ -26,8 +26,18 @@ of the site, and work on current desktop and mobile browsers.
 - The download budget is set **after** the first real build is measured
   (spec §21.3); no size is promised before then.
 
-## Evidence to collect in Phase 1
+## Evidence (Phase 1)
 
-Uncompressed and Brotli-compressed size of `.wasm` and JS glue; compile and
-instantiate time; time to first frame; time until a shot is possible; FPS on
-the reference desktop and mobile devices.
+Full numbers are in [`docs/benchmarks/phase-1-web.md`](../benchmarks/phase-1-web.md).
+
+- The bundle works on WebGL 2 in Chromium: 120 FPS on the reference desktop,
+  a first frame 0.4–0.9 s after clicking Play (local).
+- Engine download: **≈ 4.1 MiB Brotli** (28.9 MiB raw) after stripping
+  symbols, fat LTO and trimming Bevy features. The first build was 7.4 MiB
+  Brotli and 91.6 MiB raw.
+- `wasm-opt` shrinks the raw binary but makes the compressed download about
+  7 % larger, so it is **not** part of the pipeline. This reverses the spec's
+  default assumption.
+
+Still open: real mobile devices, Firefox, Safari, and network-throttled load
+times.
