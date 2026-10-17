@@ -13,6 +13,8 @@ one.
 | [0005](0005-event-driven-integration.md) | Event-driven integration (no physics time step) | accepted |
 | [0006](0006-web-lifecycle.md) | Web lifecycle: one instance per page, pause instead of remount | accepted |
 | [0007](0007-cushion-and-pocket-model.md) | Cushion, pocket and contact models | accepted |
+| [0008](0008-controls-and-accessible-overlay.md) | Controls and the accessible control layer | accepted (power mechanic provisional) |
+| [0009](0009-procedural-audio.md) | Procedural audio | accepted |
 
 Open decisions (camera, power mechanic, call-shot UI, and
 others) are listed in §31 of the [specification](../specification.es.md) and

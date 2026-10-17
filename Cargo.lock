@@ -2319,6 +2319,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "cue-audio"
+version = "0.0.0"
+
+[[package]]
 name = "cue-core"
 version = "0.0.0"
 dependencies = [
@@ -2352,11 +2356,13 @@ name = "cue-web"
 version = "0.0.0"
 dependencies = [
  "bevy",
+ "cue-audio",
  "cue-core",
  "cue-game",
  "cue-physics",
  "js-sys",
  "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

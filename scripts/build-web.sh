@@ -4,7 +4,8 @@
 #   web/dist/
 #   ├── index.html, main.js, styles.css   vanilla example host
 #   └── package/
-#       ├── index.js                      createCue() wrapper
+#       ├── index.js, ui.js, …            createCue() wrapper and controls
+#       ├── manifest.json                 sizes and SHA-256 digests
 #       └── pkg/cue_web.js, cue_web_bg.wasm
 #
 # Usage: scripts/build-web.sh            (web-release profile)
@@ -50,7 +51,9 @@ if [[ "${WASM_OPT:-0}" == 1 ]]; then
   echo "wasm-opt: $before -> $(wc -c <"$wasm") bytes"
 fi
 
-cp web/package/src/index.js "$OUT/package/index.js"
+cp web/package/src/*.js "$OUT/package/"
 cp web/example-vanilla/{index.html,main.js,styles.css} "$OUT/"
+version=$(awk -F'"' '/^\[workspace.package\]/ { found = 1 } found && /^version/ { print $2; exit }' Cargo.toml)
+node scripts/manifest.mjs "$OUT/package" "$version"
 
 node scripts/size-report.mjs "$OUT"

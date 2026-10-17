@@ -1,8 +1,9 @@
-// Reference integration, deliberately framework-free. It also collects the
-// Phase 1 measurements; `window.__cueMetrics` exposes them to test tooling.
+// Reference integration, deliberately framework-free. It also collects
+// measurements; `window.__cueMetrics` exposes them to test tooling.
 
 const $ = (id) => document.getElementById(id);
-const root = $('cue-root');
+const stage = $('cue-root');
+const play = $('play');
 const metrics = {};
 window.__cueMetrics = metrics;
 
@@ -26,58 +27,50 @@ function log(text) {
 }
 
 function resourceSize(pattern) {
-  const entry = performance
-    .getEntriesByType('resource')
-    .find((e) => pattern.test(e.name));
-  return entry ? `${(entry.transferSize / 1024).toFixed(0)} KiB transferred, ${(entry.decodedBodySize / 1024).toFixed(0)} KiB decoded` : 'n/a';
-}
-
-/** Frame rate as the page sees it, sampled over one-second windows. */
-function startFpsMeter() {
-  let frames = 0;
-  let since = performance.now();
-  const samples = [];
-  const tick = (now) => {
-    frames += 1;
-    if (now - since >= 1000) {
-      const fps = (frames * 1000) / (now - since);
-      samples.push(fps);
-      record('fps (page rAF, last 1 s)', fps.toFixed(1));
-      const sorted = [...samples].sort((a, b) => a - b);
-      record('fps p5 over session', sorted[Math.floor(sorted.length * 0.05)].toFixed(1));
-      frames = 0;
-      since = now;
-    }
-    requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
+  const entry = performance.getEntriesByType('resource').find((e) => pattern.test(e.name));
+  return entry
+    ? `${(entry.transferSize / 1024).toFixed(0)} KiB transferred, ${(entry.decodedBodySize / 1024).toFixed(0)} KiB decoded`
+    : 'n/a';
 }
 
 let game = null;
 
-$('play').addEventListener('click', async () => {
-  $('play').disabled = true;
-  root.dataset.state = 'loading';
+async function start() {
+  play.disabled = true;
+  stage.dataset.state = 'loading';
   const t0 = performance.now();
   try {
     const { createCue } = await import('./package/index.js');
-    game = await createCue({ container: root });
+    game = await createCue({
+      container: stage,
+      fallbackUrl: 'https://github.com/Otuletta/CUE',
+      // An SPA would route away here. ADR-0006: pause and hide instead of
+      // destroying, so coming back is instant.
+      onExit: () => {
+        game.pause();
+        stage.dataset.state = 'exited';
+        play.textContent = 'Back to the table';
+        play.disabled = false;
+        play.focus();
+        log('exit (paused)');
+      },
+    });
   } catch (err) {
-    root.dataset.state = 'error';
+    stage.dataset.state = 'error';
     log(`error: ${err.message}`);
-    $('play').disabled = false;
     return;
   }
-  root.dataset.state = 'running';
+  stage.dataset.state = 'running';
   record('time to ready (click → first frame)', `${(performance.now() - t0).toFixed(0)} ms`);
   record('cue_web_bg.wasm', resourceSize(/cue_web_bg\.wasm/));
   record('cue_web.js', resourceSize(/cue_web\.js/));
   record('engine version', game.version);
   log('ready');
 
-  for (const name of ['shot-start', 'paused', 'resumed', 'destroyed']) {
+  for (const name of ['shot-start', 'paused', 'resumed', 'undo', 'destroyed']) {
     game.on(name, () => log(name));
   }
+  game.on('racked', ({ cleared }) => log(`racked${cleared ? ' (table cleared)' : ''}`));
   game.on('ball-pocketed', ({ ballId, pocketId }) =>
     log(`ball-pocketed ${ballId === 0 ? 'cue ball' : ballId} → ${pocketId}`),
   );
@@ -86,33 +79,34 @@ $('play').addEventListener('click', async () => {
     const first = shot.firstContacts.join('+') || 'none';
     log(`shot-end #${shot.shotId}: first contact ${first}, ${shot.pocketed.length} pocketed`);
   });
-  $('pause').disabled = false;
-  $('rerack').disabled = false;
+  game.on('settings-change', (s) =>
+    log(`settings ${s.theme} · ${s.assists} · sound ${s.sound.enabled ? 'on' : 'off'}`),
+  );
   $('destroy').disabled = false;
-  root.querySelector('canvas')?.focus();
-  startFpsMeter();
-});
+  stage.querySelector('canvas')?.focus();
+}
 
-$('pause').addEventListener('click', () => {
-  const paused = $('pause').textContent === 'Resume';
-  if (paused) game.resume();
-  else game.pause();
-  $('pause').textContent = paused ? 'Pause' : 'Resume';
+play.addEventListener('click', () => {
+  if (stage.dataset.state === 'exited') {
+    stage.dataset.state = 'running';
+    game.resume();
+    stage.querySelector('canvas')?.focus();
+    return;
+  }
+  start();
 });
-
-$('rerack').addEventListener('click', () => game.rerack());
 
 $('destroy').addEventListener('click', async () => {
-  for (const id of ['pause', 'rerack', 'destroy']) $(id).disabled = true;
+  $('destroy').disabled = true;
   game.destroy();
   await game.destroy(); // idempotent by contract: same promise
-  root.dataset.state = 'destroyed';
-  log('canvas removed');
+  stage.dataset.state = 'destroyed';
+  log('instance destroyed; reload the page to play again');
 });
 
 // A hidden tab should cost nothing.
 document.addEventListener('visibilitychange', () => {
-  if (!game || root.dataset.state !== 'running') return;
+  if (!game || stage.dataset.state !== 'running') return;
   if (document.hidden) game.pause();
-  else if ($('pause').textContent === 'Pause') game.resume();
+  else game.resume();
 });

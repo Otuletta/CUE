@@ -15,6 +15,7 @@ use cue_physics::Cushion;
 
 use crate::{
     ball_texture,
+    settings::{TableMaterials, Theme},
     sim::{Ball, Simulation},
 };
 
@@ -34,6 +35,7 @@ fn flat(p: DVec2) -> Vec2 {
 pub(crate) fn spawn_table(
     mut commands: Commands,
     sim: Res<Simulation>,
+    theme: Res<Theme>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -41,19 +43,26 @@ pub(crate) fn spawn_table(
     let outer = geometry.outer_half_extents().as_vec2();
     let rim = outer + Vec2::splat(RAIL_WIDTH);
 
-    let material =
-        |materials: &mut Assets<StandardMaterial>, rgb: (f32, f32, f32), roughness: f32| {
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(rgb.0, rgb.1, rgb.2),
-                perceptual_roughness: roughness,
-                reflectance: 0.25,
-                ..default()
-            })
-        };
-    let cloth = material(&mut materials, (0.06, 0.30, 0.24), 0.92);
-    let cushion = material(&mut materials, (0.05, 0.25, 0.20), 0.9);
-    let wood = material(&mut materials, (0.16, 0.09, 0.05), 0.45);
-    let leather = material(&mut materials, (0.035, 0.03, 0.03), 0.7);
+    // Colours come from the theme and are updated in place when it changes.
+    let palette = theme.palette();
+    let material = |materials: &mut Assets<StandardMaterial>, colour: Color, roughness: f32| {
+        materials.add(StandardMaterial {
+            base_color: colour,
+            perceptual_roughness: roughness,
+            reflectance: 0.25,
+            ..default()
+        })
+    };
+    let cloth = material(&mut materials, palette.cloth, 0.92);
+    let cushion = material(&mut materials, palette.cushion, 0.9);
+    let wood = material(&mut materials, palette.wood, 0.45);
+    let leather = material(&mut materials, palette.leather, 0.7);
+    commands.insert_resource(TableMaterials {
+        cloth: cloth.clone(),
+        cushion: cushion.clone(),
+        wood: wood.clone(),
+        leather: leather.clone(),
+    });
     let hole = materials.add(StandardMaterial {
         base_color: Color::BLACK,
         unlit: true,

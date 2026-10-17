@@ -2,6 +2,8 @@
 //!
 //! For unattended visual checks:
 //!
+//! - `CUE_THEME=classic|studio|contrast` and `CUE_ASSISTS=off|basic|assisted`
+//!   pick the presentation.
 //! - `CUE_SHOT=<angle_deg>,<power>` strikes the cue ball on the first frame.
 //! - `CUE_SCREENSHOT=<path>` saves a screenshot after `CUE_SCREENSHOT_AT`
 //!   seconds (default 1.5) and exits shortly after.
@@ -11,7 +13,7 @@ use bevy::{
     render::view::screenshot::{Screenshot, save_to_disk},
 };
 use cue_core::glam::DVec2;
-use cue_game::{CuePlugin, Simulation};
+use cue_game::{Assists, CuePlugin, DevHud, Simulation, Theme};
 use cue_physics::Strike;
 
 fn main() -> AppExit {
@@ -25,6 +27,19 @@ fn main() -> AppExit {
             ..default()
         }))
         .add_plugins(CuePlugin)
+        .insert_resource(DevHud(true))
+        .insert_resource(
+            std::env::var("CUE_THEME")
+                .ok()
+                .and_then(|t| Theme::parse(&t))
+                .unwrap_or_default(),
+        )
+        .insert_resource(
+            std::env::var("CUE_ASSISTS")
+                .ok()
+                .and_then(|a| Assists::parse(&a))
+                .unwrap_or_default(),
+        )
         .add_systems(Update, (scripted_shot, scripted_screenshot))
         .run()
 }
@@ -41,8 +56,8 @@ fn scripted_shot(mut sim: ResMut<Simulation>, mut done: Local<bool>) {
         return;
     };
     let strike = Strike::centre(DVec2::from_angle(angle.to_radians()), power);
-    if sim.world.strike(strike).is_ok() {
-        sim.clock = sim.world.time();
+    if let Err(e) = sim.strike(strike) {
+        warn!("scripted shot rejected: {e}");
     }
 }
 

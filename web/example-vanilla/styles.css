@@ -57,9 +57,12 @@ main {
 .play {
   position: absolute;
   inset: 0;
+  z-index: 2;
   margin: auto;
-  width: 9rem;
+  width: fit-content;
+  min-width: 9rem;
   height: 3rem;
+  padding: 0 1.5rem;
   font: inherit;
   font-size: 1.1rem;
   letter-spacing: 0.1em;
@@ -70,24 +73,29 @@ main {
   cursor: pointer;
 }
 
-.stage[data-state='loading'] .play::after {
-  content: '…';
-}
-
-.stage:not([data-state='idle']):not([data-state='loading']):not([data-state='error']) .play {
+.stage:not([data-state='idle']):not([data-state='exited']) .play {
   display: none;
 }
 
-.hint {
-  margin: 0.75rem 0 0;
-  font-size: 0.85rem;
-  line-height: 1.5;
+.stage[data-state='exited'] .cue-root {
+  visibility: hidden;
+}
+
+.dev {
+  margin-top: 1rem;
   color: var(--muted);
 }
 
-.hint strong {
-  color: var(--fg);
-  font-weight: 600;
+.dev summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+
+.dev a {
+  color: var(--accent);
+  align-self: center;
 }
 
 .controls {

@@ -11,12 +11,17 @@
 //! - **Commands in, events out.** Host calls enqueue commands that a Bevy
 //!   system applies at the start of the next frame, so the host never touches
 //!   ECS state directly. Game events go to a single JS listener.
+//! - **State is published, not queried.** Once per frame the engine writes a
+//!   small snapshot (aim, power, ball in hand…) that the host's controls read
+//!   cheaply without reaching into the ECS.
 //! - **Pausing stops rendering.** A paused instance switches winit to
 //!   reactive mode and sleeps until the host resumes it, so a backgrounded or
 //!   hidden game costs no CPU or GPU.
 //!
 //! The browser is single-threaded for this module, which is why the listener
-//! lives in a thread-local.
+//! and the audio engine live in thread-locals.
+
+mod audio;
 
 use std::{
     cell::RefCell,
@@ -33,17 +38,19 @@ use bevy::{
     prelude::*,
     winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent},
 };
-use cue_core::ShotReport;
-use cue_game::{Contact, CuePlugin, Paused, ShotFinished, Simulation};
-use cue_physics::SimEventKind;
+use cue_core::{ShotReport, glam::DVec2};
+use cue_game::{
+    Aim, Assists, Contact, CuePlugin, GameCommand, GameEvent, LastShot, MIN_SHOT_POWER, Paused,
+    ShotFinished, Simulation, Theme,
+};
 use wasm_bindgen::prelude::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum Command {
     Pause,
     Resume,
-    Rerack,
     Destroy,
+    Game(GameCommand),
 }
 
 /// Lifecycle of the page's single instance.
@@ -55,8 +62,24 @@ enum Lifecycle {
     Destroyed,
 }
 
+/// What the host's controls need to draw, refreshed every frame.
+#[derive(Debug, Clone, PartialEq)]
+struct Snapshot {
+    power: f64,
+    tip: DVec2,
+    at_rest: bool,
+    in_hand: bool,
+    can_undo: bool,
+    paused: bool,
+    theme: &'static str,
+    assists: &'static str,
+    shots: u32,
+    balls_in_play: Vec<u8>,
+}
+
 static LIFECYCLE: Mutex<Lifecycle> = Mutex::new(Lifecycle::Idle);
 static INBOX: Mutex<Vec<Command>> = Mutex::new(Vec::new());
+static SNAPSHOT: Mutex<Option<Snapshot>> = Mutex::new(None);
 /// Wakes a sleeping (paused) event loop so queued commands are seen.
 static WAKER: Mutex<Option<Box<dyn Fn() + Send>>> = Mutex::new(None);
 /// Frames run by the engine, so hosts and tests can verify that a paused
@@ -67,30 +90,31 @@ thread_local! {
     static LISTENER: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) };
 }
 
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 fn lifecycle() -> Lifecycle {
-    *LIFECYCLE.lock().unwrap_or_else(PoisonError::into_inner)
+    *lock(&LIFECYCLE)
 }
 
 fn set_lifecycle(state: Lifecycle) {
-    *LIFECYCLE.lock().unwrap_or_else(PoisonError::into_inner) = state;
+    *lock(&LIFECYCLE) = state;
 }
 
 fn send(command: Command) -> Result<(), JsError> {
     if lifecycle() != Lifecycle::Mounted {
         return Err(JsError::new("INSTANCE_NOT_MOUNTED"));
     }
-    INBOX
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .push(command);
-    if let Some(wake) = WAKER
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .as_ref()
-    {
+    lock(&INBOX).push(command);
+    if let Some(wake) = lock(&WAKER).as_ref() {
         wake();
     }
     Ok(())
+}
+
+fn game(command: GameCommand) -> Result<(), JsError> {
+    send(Command::Game(command))
 }
 
 /// Version of the CUE build, for diagnostics and the `ready` event.
@@ -109,7 +133,7 @@ pub fn version() -> String {
 /// `RELOAD_REQUIRED` after [`destroy`]: winit allows one event loop per
 /// page, so a destroyed instance cannot be re-created without a reload. Hosts
 /// that need repeated mounting should pause and resume instead, or isolate
-/// CUE in an iframe (decision recorded in ADR-0005).
+/// CUE in an iframe (ADR-0006).
 #[wasm_bindgen]
 pub fn mount(canvas_selector: &str) -> Result<(), JsError> {
     match lifecycle() {
@@ -149,12 +173,12 @@ pub fn mount(canvas_selector: &str) -> Result<(), JsError> {
         .insert_resource(WinitSettings::game())
         .add_systems(Startup, install_waker)
         .add_systems(First, apply_commands)
-        .add_systems(Last, emit_events)
+        .add_systems(Last, (emit_events, publish_state))
         .run();
     Ok(())
 }
 
-/// Pauses simulation, input and rendering.
+/// Pauses simulation, input, sound and rendering.
 #[wasm_bindgen]
 pub fn pause() -> Result<(), JsError> {
     send(Command::Pause)
@@ -166,10 +190,70 @@ pub fn resume() -> Result<(), JsError> {
     send(Command::Resume)
 }
 
-/// Starts over with a fresh rack.
+/// Racks the balls again. Undoable.
 #[wasm_bindgen]
 pub fn rerack() -> Result<(), JsError> {
-    send(Command::Rerack)
+    game(GameCommand::Rerack)
+}
+
+/// Undoes the last shot or re-rack.
+#[wasm_bindgen]
+pub fn undo() -> Result<(), JsError> {
+    game(GameCommand::Undo)
+}
+
+/// Sets the charged power, `0..=1`, as a slider would.
+#[wasm_bindgen(js_name = setPower)]
+pub fn set_power(power: f64) -> Result<(), JsError> {
+    game(GameCommand::SetPower(power))
+}
+
+/// Shoots with the current aim, power and spin. Ignored while balls move or
+/// if the power is too low to be intentional.
+#[wasm_bindgen]
+pub fn shoot() -> Result<(), JsError> {
+    game(GameCommand::Shoot)
+}
+
+/// Sets where the tip strikes the cue ball, in ball radii: `x` is side spin
+/// (positive right), `y` follow (positive) or draw (negative).
+#[wasm_bindgen(js_name = setTip)]
+pub fn set_tip(x: f64, y: f64) -> Result<(), JsError> {
+    game(GameCommand::SetTip(DVec2::new(x, y)))
+}
+
+/// Sets the visual theme: `classic`, `studio` or `contrast`.
+#[wasm_bindgen(js_name = setTheme)]
+pub fn set_theme(name: &str) -> Result<(), JsError> {
+    let theme = Theme::parse(name).ok_or_else(|| JsError::new("UNKNOWN_THEME"))?;
+    game(GameCommand::SetTheme(theme))
+}
+
+/// Sets the aiming assistance: `off`, `basic` or `assisted`.
+#[wasm_bindgen(js_name = setAssists)]
+pub fn set_assists(name: &str) -> Result<(), JsError> {
+    let assists = Assists::parse(name).ok_or_else(|| JsError::new("UNKNOWN_ASSISTS"))?;
+    game(GameCommand::SetAssists(assists))
+}
+
+/// Shows or hides the developer overlay.
+#[wasm_bindgen(js_name = toggleDevOverlay)]
+pub fn toggle_dev_overlay() -> Result<(), JsError> {
+    game(GameCommand::ToggleDevHud)
+}
+
+/// Turns sound on or off and sets its volume, `0..=1`. Takes effect
+/// immediately, also before audio is unlocked.
+#[wasm_bindgen(js_name = setAudio)]
+pub fn set_audio(enabled: bool, volume: f64) {
+    audio::configure(enabled, volume as f32);
+}
+
+/// Creates or resumes the audio context. Call it from inside a user gesture
+/// (`pointerdown`, `keydown`), as browsers require.
+#[wasm_bindgen(js_name = unlockAudio)]
+pub fn unlock_audio() -> Result<(), JsValue> {
+    audio::unlock()
 }
 
 /// Stops the game loop and releases the GPU surface. Idempotent.
@@ -184,6 +268,31 @@ pub fn destroy() {
 #[wasm_bindgen(js_name = frameCount)]
 pub fn frame_count() -> u32 {
     FRAMES.load(Ordering::Relaxed)
+}
+
+/// The engine's state as of its last frame, as a plain object:
+/// `{ power, tipX, tipY, atRest, inHand, canUndo, paused, theme, assists,
+/// shots, ballsInPlay, minPower }`. `null` before the first frame.
+#[wasm_bindgen]
+pub fn state() -> JsValue {
+    let Some(s) = lock(&SNAPSHOT).clone() else {
+        return JsValue::NULL;
+    };
+    let balls: js_sys::Array = s.balls_in_play.iter().map(|n| JsValue::from(*n)).collect();
+    object(&[
+        ("power", s.power.into()),
+        ("tipX", s.tip.x.into()),
+        ("tipY", s.tip.y.into()),
+        ("atRest", s.at_rest.into()),
+        ("inHand", s.in_hand.into()),
+        ("canUndo", s.can_undo.into()),
+        ("paused", s.paused.into()),
+        ("theme", s.theme.into()),
+        ("assists", s.assists.into()),
+        ("shots", s.shots.into()),
+        ("ballsInPlay", balls.into()),
+        ("minPower", MIN_SHOT_POWER.into()),
+    ])
 }
 
 /// Registers the function that receives `(name, detail)` for every event.
@@ -205,22 +314,18 @@ fn emit(name: &str, detail: &JsValue) {
 
 fn install_waker(proxy: Res<EventLoopProxyWrapper>) {
     let proxy = (**proxy).clone();
-    *WAKER.lock().unwrap_or_else(PoisonError::into_inner) = Some(Box::new(move || {
+    *lock(&WAKER) = Some(Box::new(move || {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }));
 }
 
 fn apply_commands(
     mut paused: ResMut<Paused>,
-    mut sim: ResMut<Simulation>,
     mut settings: ResMut<WinitSettings>,
     mut exit: MessageWriter<AppExit>,
+    mut game: MessageWriter<GameCommand>,
 ) {
-    let commands: Vec<_> = INBOX
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .drain(..)
-        .collect();
+    let commands: Vec<_> = lock(&INBOX).drain(..).collect();
     for command in commands {
         match command {
             Command::Pause if !paused.0 => {
@@ -230,19 +335,24 @@ fn apply_commands(
                     focused_mode: sleep,
                     unfocused_mode: sleep,
                 };
+                audio::set_running(false);
                 emit("paused", &JsValue::UNDEFINED);
             }
             Command::Resume if paused.0 => {
                 paused.0 = false;
                 *settings = WinitSettings::game();
+                audio::set_running(true);
                 emit("resumed", &JsValue::UNDEFINED);
             }
-            Command::Rerack => sim.rerack(),
             Command::Destroy => {
                 exit.write(AppExit::Success);
-                *WAKER.lock().unwrap_or_else(PoisonError::into_inner) = None;
+                *lock(&WAKER) = None;
+                audio::set_running(false);
                 set_lifecycle(Lifecycle::Destroyed);
                 emit("destroyed", &JsValue::UNDEFINED);
+            }
+            Command::Game(g) => {
+                game.write(g);
             }
             Command::Pause | Command::Resume => {}
         }
@@ -287,15 +397,16 @@ fn shot_summary(report: &ShotReport) -> JsValue {
     ])
 }
 
-/// Translates simulation state changes into host events.
+/// Translates engine happenings into host events and sound.
 ///
 /// Per shot the host sees exactly one `shot-start` and one `shot-end`, with
-/// any number of `ball-pocketed` in between (spec §16.4). A shot abandoned
-/// by a re-rack still ends, with `{ abandoned: true }`.
+/// any number of `ball-pocketed` in between (spec §16.4). A shot interrupted
+/// by an undo or re-rack still ends, with `{ abandoned: true }`.
 fn emit_events(
     sim: Res<Simulation>,
     mut contacts: MessageReader<Contact>,
     mut finished: MessageReader<ShotFinished>,
+    mut game_events: MessageReader<GameEvent>,
     mut started: Local<bool>,
     mut in_shot: Local<bool>,
 ) {
@@ -311,8 +422,12 @@ fn emit_events(
         *in_shot = true;
         emit("shot-start", &JsValue::UNDEFINED);
     }
+    let mut voiced = 0;
     for Contact(event) in contacts.read() {
-        if let SimEventKind::Pocketed { ball, pocket } = event.kind {
+        if voiced < audio::MAX_PER_FRAME && audio::play_event(&event.kind) {
+            voiced += 1;
+        }
+        if let cue_physics::SimEventKind::Pocketed { ball, pocket } = event.kind {
             emit(
                 "ball-pocketed",
                 &object(&[
@@ -328,5 +443,39 @@ fn emit_events(
     } else if *in_shot && sim.world.is_at_rest() {
         emit("shot-end", &object(&[("abandoned", JsValue::TRUE)]));
         *in_shot = false;
+    }
+    for event in game_events.read() {
+        match event {
+            GameEvent::Racked { cleared } => {
+                emit("racked", &object(&[("cleared", JsValue::from(*cleared))]));
+            }
+            GameEvent::Undone => emit("undo", &JsValue::UNDEFINED),
+        }
+    }
+}
+
+fn publish_state(
+    sim: Res<Simulation>,
+    aim: Res<Aim>,
+    paused: Res<Paused>,
+    theme: Res<Theme>,
+    assists: Res<Assists>,
+    last: Res<LastShot>,
+) {
+    let snapshot = Snapshot {
+        power: aim.power,
+        tip: aim.tip,
+        at_rest: sim.world.is_at_rest(),
+        in_hand: sim.in_hand(),
+        can_undo: sim.can_undo(),
+        paused: paused.0,
+        theme: theme.name(),
+        assists: assists.name(),
+        shots: last.0.as_ref().map_or(0, |r| r.shot_id),
+        balls_in_play: sim.world.balls_in_play().map(|b| b.number()).collect(),
+    };
+    let mut slot = lock(&SNAPSHOT);
+    if slot.as_ref() != Some(&snapshot) {
+        *slot = Some(snapshot);
     }
 }

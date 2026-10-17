@@ -1,15 +1,20 @@
-//! Aiming, charging and taking a shot, with mouse, touch or keyboard.
+//! Aiming, charging and taking a shot, with mouse, touch, keyboard or the
+//! host page's controls.
 //!
-//! Phase 1 gesture (to be validated with real users, ADR-010):
+//! In-canvas gesture (ADR-008):
 //!
 //! - **Aim:** move the mouse, or touch the point to shoot towards.
 //! - **Power:** press and drag *back*, away from the aim direction.
 //! - **Shoot:** release. Releasing with almost no pull cancels instead, so a
 //!   click or a tap never fires a shot by accident.
 //! - **Cancel:** `Esc` or right click.
+//! - **Ball in hand** (start of a rack, after a scratch): press *on* the cue
+//!   ball and drag it to a free spot.
 //!
-//! The keyboard path is complete on its own: arrows aim and set power,
-//! `Space` shoots, `W`/`A`/`S`/`D` move the tip for spin.
+//! Every gesture has a non-pointer equivalent, so the game is playable from
+//! the keyboard alone or from the host's accessible controls: arrows aim and
+//! set power, `Space` shoots, `W`/`A`/`S`/`D` move the tip, `I`/`J`/`K`/`L` move
+//! a cue ball in hand, `U` undoes, `R` re-racks.
 
 use bevy::{input::touch::Touches, prelude::*, window::PrimaryWindow};
 use cue_core::{
@@ -18,12 +23,15 @@ use cue_core::{
 };
 use cue_physics::{MAX_TIP_OFFSET, Motion, Strike};
 
-use crate::sim::{Paused, Simulation};
+use crate::{
+    settings::{Assists, DevHud, GameCommand, Theme},
+    sim::{GameEvent, Paused, Simulation},
+};
 
 /// Drag distance on the table, in metres, that maps to full power.
 const FULL_PULL: f64 = 0.45;
-/// Releases below this power cancel rather than shoot.
-const MIN_SHOT_POWER: f64 = 0.03;
+/// Shots below this power are refused, so a stray click never fires.
+pub const MIN_SHOT_POWER: f64 = 0.03;
 /// Perceptual power curve: more resolution for soft shots.
 const POWER_EXPONENT: f64 = 1.6;
 /// Keyboard aim speed, radians per second (and with `Shift` held).
@@ -32,6 +40,10 @@ const KEY_AIM_SPEED: (f64, f64) = (1.0, 0.08);
 const KEY_POWER_SPEED: f64 = 0.6;
 /// Keyboard tip movement per second, in ball radii.
 const KEY_TIP_SPEED: f64 = 0.6;
+/// Keyboard cue-ball movement while in hand, m/s.
+const KEY_PLACE_SPEED: f64 = 0.4;
+/// A press within this many radii of the cue ball picks it up when in hand.
+const PICK_RADII: f64 = 1.6;
 
 const CUE_LENGTH: f32 = 1.45;
 const CUE_TIP_RADIUS: f32 = 0.0065;
@@ -50,7 +62,7 @@ pub struct Aim {
     pub power: f64,
     /// Tip offset in ball radii (`x` side, `y` follow/draw).
     pub tip: DVec2,
-    drag: Option<Drag>,
+    gesture: Option<Gesture>,
 }
 
 impl Default for Aim {
@@ -59,16 +71,24 @@ impl Default for Aim {
             direction: DVec2::X,
             power: 0.0,
             tip: DVec2::ZERO,
-            drag: None,
+            gesture: None,
         }
     }
 }
 
+impl Aim {
+    /// Whether the player is currently dragging the cue ball.
+    pub fn placing(&self) -> bool {
+        matches!(self.gesture, Some(Gesture::Place { .. }))
+    }
+}
+
+/// A pointer gesture in progress. `touch` is the touch id, `None` for the
+/// mouse.
 #[derive(Debug, Clone, Copy)]
-struct Drag {
-    anchor: DVec2,
-    /// Touch id, or `None` for the mouse.
-    touch: Option<u64>,
+enum Gesture {
+    Charge { anchor: DVec2, touch: Option<u64> },
+    Place { touch: Option<u64>, valid: bool },
 }
 
 /// Marker for the cue stick mesh.
@@ -110,6 +130,71 @@ fn table_point(
     Some(DVec2::new(f64::from(p.x), f64::from(p.z)))
 }
 
+/// Shoots with the current aim. Refuses soft "shots" below
+/// [`MIN_SHOT_POWER`].
+fn fire(sim: &mut Simulation, aim: &mut Aim) {
+    if aim.power < MIN_SHOT_POWER {
+        return;
+    }
+    let strike = Strike {
+        direction: aim.direction,
+        power: aim.power.powf(POWER_EXPONENT),
+        tip_offset: aim.tip,
+    };
+    match sim.strike(strike) {
+        Ok(()) => aim.power = 0.0,
+        Err(e) => warn!("strike rejected: {e}"),
+    }
+}
+
+fn undo(sim: &mut Simulation, aim: &mut Aim, events: &mut MessageWriter<GameEvent>) {
+    if sim.undo() {
+        aim.gesture = None;
+        aim.power = 0.0;
+        events.write(GameEvent::Undone);
+    }
+}
+
+fn rerack(sim: &mut Simulation, aim: &mut Aim, events: &mut MessageWriter<GameEvent>) {
+    sim.rerack();
+    *aim = Aim {
+        tip: aim.tip,
+        ..Aim::default()
+    };
+    events.write(GameEvent::Racked { cleared: false });
+}
+
+/// Applies [`GameCommand`]s sent from outside the canvas.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn apply_commands(
+    mut commands: MessageReader<GameCommand>,
+    paused: Res<Paused>,
+    mut sim: ResMut<Simulation>,
+    mut aim: ResMut<Aim>,
+    mut theme: ResMut<Theme>,
+    mut assists: ResMut<Assists>,
+    mut dev: ResMut<DevHud>,
+    mut events: MessageWriter<GameEvent>,
+) {
+    for command in commands.read() {
+        match *command {
+            GameCommand::SetTheme(t) if *theme != t => *theme = t,
+            GameCommand::SetAssists(a) if *assists != a => *assists = a,
+            GameCommand::ToggleDevHud => dev.0 = !dev.0,
+            GameCommand::SetTip(t) if t.is_finite() => aim.tip = t.clamp_length_max(MAX_TIP_OFFSET),
+            // Everything below acts on the table, which a paused game must not.
+            _ if paused.0 => {}
+            GameCommand::SetPower(p) if p.is_finite() && sim.world.is_at_rest() => {
+                aim.power = p.clamp(0.0, 1.0);
+            }
+            GameCommand::Shoot if sim.world.is_at_rest() => fire(&mut sim, &mut aim),
+            GameCommand::Undo => undo(&mut sim, &mut aim, &mut events),
+            GameCommand::Rerack => rerack(&mut sim, &mut aim, &mut events),
+            _ => {}
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn read_input(
     time: Res<Time>,
@@ -121,28 +206,39 @@ pub(crate) fn read_input(
     paused: Res<Paused>,
     mut sim: ResMut<Simulation>,
     mut aim: ResMut<Aim>,
+    mut dev: ResMut<DevHud>,
+    mut events: MessageWriter<GameEvent>,
 ) {
+    if keys.just_pressed(KeyCode::Backquote) {
+        dev.0 = !dev.0;
+    }
     if paused.0 {
-        aim.drag = None;
+        aim.gesture = None;
         return;
     }
-    if keys.just_pressed(KeyCode::KeyR) {
-        sim.rerack();
-        *aim = Aim {
-            tip: aim.tip,
-            ..Aim::default()
-        };
+    let control = keys.any_pressed([
+        KeyCode::ControlLeft,
+        KeyCode::ControlRight,
+        KeyCode::SuperLeft,
+        KeyCode::SuperRight,
+    ]);
+    if keys.just_pressed(KeyCode::KeyU) || (control && keys.just_pressed(KeyCode::KeyZ)) {
+        undo(&mut sim, &mut aim, &mut events);
+        return;
+    }
+    if keys.just_pressed(KeyCode::KeyR) && !control {
+        rerack(&mut sim, &mut aim, &mut events);
         return;
     }
     let Some(cue) = sim.cue_position().filter(|_| sim.world.is_at_rest()) else {
-        aim.drag = None;
+        aim.gesture = None;
         return;
     };
     let (Ok(window), Ok((camera, camera_transform))) = (window.single(), camera.single()) else {
         return;
     };
-    let height = sim.table().ball.radius as f32;
-    let to_table = |screen: Vec2| table_point(camera, camera_transform, screen, height);
+    let r = sim.table().ball.radius;
+    let to_table = |screen: Vec2| table_point(camera, camera_transform, screen, r as f32);
     let aim_at = |aim: &mut Aim, p: DVec2| {
         if let Some(d) = (p - cue).try_normalize().filter(|_| p.distance(cue) > 1e-3) {
             aim.direction = d;
@@ -151,38 +247,44 @@ pub(crate) fn read_input(
 
     // Cancel.
     if keys.just_pressed(KeyCode::Escape) || mouse.just_pressed(MouseButton::Right) {
-        aim.drag = None;
+        aim.gesture = None;
         aim.power = 0.0;
     }
 
-    // Press: start charging.
-    if aim.drag.is_none() {
-        if let Some(t) = touches.iter_just_pressed().next() {
-            if let Some(p) = to_table(t.position()) {
-                aim_at(&mut aim, p);
-                aim.drag = Some(Drag {
-                    anchor: p,
-                    touch: Some(t.id()),
-                });
+    // Press: pick up the cue ball (in hand) or start charging.
+    if aim.gesture.is_none() {
+        let press = touches
+            .iter_just_pressed()
+            .next()
+            .map(|t| (t.position(), Some(t.id())))
+            .or_else(|| {
+                mouse
+                    .just_pressed(MouseButton::Left)
+                    .then(|| window.cursor_position().map(|p| (p, None)))
+                    .flatten()
+            });
+        if let Some((screen, touch)) = press {
+            if let Some(p) = to_table(screen) {
+                if sim.in_hand() && p.distance(cue) < PICK_RADII * r {
+                    aim.gesture = Some(Gesture::Place { touch, valid: true });
+                } else {
+                    if touch.is_some() {
+                        aim_at(&mut aim, p);
+                    }
+                    aim.gesture = Some(Gesture::Charge { anchor: p, touch });
+                }
             }
-        } else if mouse.just_pressed(MouseButton::Left) {
-            if let Some(p) = window.cursor_position().and_then(to_table) {
-                aim.drag = Some(Drag {
-                    anchor: p,
-                    touch: None,
-                });
-            }
-        } else if let Some(p) = window.cursor_position().and_then(to_table) {
+        } else if touches.iter().next().is_none()
+            && let Some(p) = window.cursor_position().and_then(to_table)
+        {
             // Hover aims (mouse only; touch has no hover).
-            if touches.iter().next().is_none() {
-                aim_at(&mut aim, p);
-            }
+            aim_at(&mut aim, p);
         }
     }
 
-    // Drag: pull back for power. Release: shoot or cancel.
-    if let Some(drag) = aim.drag {
-        let (current, released) = match drag.touch {
+    // Drag and release.
+    let pointer = |touch: Option<u64>| -> (Option<DVec2>, bool) {
+        match touch {
             Some(id) => match touches.get_pressed(id) {
                 Some(t) => (to_table(t.position()), false),
                 None => (
@@ -197,69 +299,71 @@ pub(crate) fn read_input(
                 window.cursor_position().and_then(to_table),
                 mouse.just_released(MouseButton::Left) || !mouse.pressed(MouseButton::Left),
             ),
-        };
-        if let Some(p) = current {
-            let pull = (drag.anchor - p).dot(aim.direction);
-            aim.power = (pull / FULL_PULL).clamp(0.0, 1.0);
         }
-        if released {
-            aim.drag = None;
-            if aim.power >= MIN_SHOT_POWER {
-                fire(&mut sim, &mut aim);
-            } else {
-                aim.power = 0.0;
+    };
+    match aim.gesture {
+        Some(Gesture::Charge { anchor, touch }) => {
+            let (current, released) = pointer(touch);
+            if let Some(p) = current {
+                let pull = (anchor - p).dot(aim.direction);
+                aim.power = (pull / FULL_PULL).clamp(0.0, 1.0);
             }
+            if released {
+                aim.gesture = None;
+                fire(&mut sim, &mut aim);
+                aim.power = 0.0;
+                return;
+            }
+        }
+        Some(Gesture::Place { touch, .. }) => {
+            let (current, released) = pointer(touch);
+            let valid = current.is_some_and(|p| sim.place_cue(p).is_ok());
+            aim.gesture = (!released).then_some(Gesture::Place { touch, valid });
             return;
         }
+        None => {}
     }
 
     // Keyboard.
     let dt = time.delta_secs_f64();
-    let aim_speed = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
-        KEY_AIM_SPEED.1
-    } else {
-        KEY_AIM_SPEED.0
-    };
-    let turn = f64::from(
-        i8::from(keys.pressed(KeyCode::ArrowLeft)) - i8::from(keys.pressed(KeyCode::ArrowRight)),
-    );
+    let pressed = |k| i8::from(keys.pressed(k));
+    let axis = |neg, pos| f64::from(pressed(pos) - pressed(neg));
+    let fine = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    let turn = axis(KeyCode::ArrowRight, KeyCode::ArrowLeft);
     if turn != 0.0 {
-        aim.direction = DVec2::from_angle(turn * aim_speed * dt).rotate(aim.direction);
+        let speed = if fine {
+            KEY_AIM_SPEED.1
+        } else {
+            KEY_AIM_SPEED.0
+        };
+        aim.direction = DVec2::from_angle(turn * speed * dt).rotate(aim.direction);
     }
-    let charge = f64::from(
-        i8::from(keys.pressed(KeyCode::ArrowUp)) - i8::from(keys.pressed(KeyCode::ArrowDown)),
-    );
+    let charge = axis(KeyCode::ArrowDown, KeyCode::ArrowUp);
     if charge != 0.0 {
         aim.power = (aim.power + charge * KEY_POWER_SPEED * dt).clamp(0.0, 1.0);
     }
-    let tip_move = DVec2::new(
-        f64::from(i8::from(keys.pressed(KeyCode::KeyD)) - i8::from(keys.pressed(KeyCode::KeyA))),
-        f64::from(i8::from(keys.pressed(KeyCode::KeyW)) - i8::from(keys.pressed(KeyCode::KeyS))),
+    let tip = DVec2::new(
+        axis(KeyCode::KeyA, KeyCode::KeyD),
+        axis(KeyCode::KeyS, KeyCode::KeyW),
     );
-    if tip_move != DVec2::ZERO {
-        aim.tip = (aim.tip + tip_move * KEY_TIP_SPEED * dt).clamp_length_max(MAX_TIP_OFFSET);
+    if tip != DVec2::ZERO {
+        aim.tip = (aim.tip + tip * KEY_TIP_SPEED * dt).clamp_length_max(MAX_TIP_OFFSET);
     }
     if keys.just_pressed(KeyCode::KeyC) {
         aim.tip = DVec2::ZERO;
     }
-    if keys.just_pressed(KeyCode::Space) && aim.power >= MIN_SHOT_POWER {
-        fire(&mut sim, &mut aim);
-    }
-}
-
-fn fire(sim: &mut Simulation, aim: &mut Aim) {
-    let strike = Strike {
-        direction: aim.direction,
-        power: aim.power.powf(POWER_EXPONENT),
-        tip_offset: aim.tip,
-    };
-    match sim.world.strike(strike) {
-        Ok(()) => {
-            // The shot starts at the world's time; drop any presentation lag.
-            sim.clock = sim.world.time();
-            aim.power = 0.0;
+    if sim.in_hand() {
+        // On screen, up is −Z: the far rail.
+        let nudge = DVec2::new(
+            axis(KeyCode::KeyJ, KeyCode::KeyL),
+            axis(KeyCode::KeyI, KeyCode::KeyK),
+        );
+        if nudge != DVec2::ZERO {
+            let _ = sim.place_cue(cue + nudge * KEY_PLACE_SPEED * dt);
         }
-        Err(e) => warn!("strike rejected: {e}"),
+    }
+    if keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::Enter) {
+        fire(&mut sim, &mut aim);
     }
 }
 
@@ -267,6 +371,8 @@ fn fire(sim: &mut Simulation, aim: &mut Aim) {
 pub(crate) fn draw_aim(
     sim: Res<Simulation>,
     aim: Res<Aim>,
+    assists: Res<Assists>,
+    theme: Res<Theme>,
     mut gizmos: Gizmos,
     mut stick: Query<(&mut Transform, &mut Visibility), With<CueStick>>,
 ) {
@@ -277,12 +383,28 @@ pub(crate) fn draw_aim(
         *visibility = Visibility::Hidden;
         return;
     };
+    let palette = theme.palette();
+    let r = sim.table().ball.radius;
+    let at = |p: DVec2| DVec3::new(p.x, r, p.y).as_vec3();
+    let flat = |p: Vec3| Isometry3d::new(p, Quat::from_rotation_arc(Vec3::Z, Vec3::Y));
+    let centre = at(cue);
+
+    if sim.in_hand() {
+        // A ring marks the cue ball as movable; red while the drag is over
+        // an invalid spot.
+        let colour = match aim.gesture {
+            Some(Gesture::Place { valid: false, .. }) => Color::srgb(1.0, 0.25, 0.25),
+            _ => palette.guide,
+        };
+        gizmos.circle(flat(centre), (1.45 * r) as f32, colour);
+    }
+    if aim.placing() {
+        *visibility = Visibility::Hidden;
+        return;
+    }
     *visibility = Visibility::Inherited;
 
-    let r = sim.table().ball.radius;
-    let centre = DVec3::new(cue.x, r, cue.y).as_vec3();
     let dir = DVec3::new(aim.direction.x, 0.0, aim.direction.y).as_vec3();
-
     // Stick: tip just behind the ball, drawn back with power, butt raised.
     let axis = (-dir * CUE_ELEVATION.cos() + Vec3::Y * CUE_ELEVATION.sin()).normalize();
     let side = dir.cross(Vec3::Y);
@@ -292,21 +414,22 @@ pub(crate) fn draw_aim(
     transform.translation = tip + axis * CUE_LENGTH / 2.0;
     transform.rotation = Quat::from_rotation_arc(Vec3::Y, axis);
 
-    // Guide: line to the first ball or cushion, ghost ball, object path.
-    let guide = Color::srgba(1.0, 1.0, 1.0, 0.55);
+    if *assists == Assists::Off {
+        return;
+    }
+    // Guide: line to the first ball or cushion, and a ghost ball there.
     let (end, hit) = first_contact(&sim, cue, aim.direction);
-    let end3 = DVec3::new(end.x, r, end.y).as_vec3();
-    gizmos.line(centre, end3, guide);
-    let flat = Isometry3d::new(end3, Quat::from_rotation_arc(Vec3::Z, Vec3::Y));
-    gizmos.circle(flat, r as f32, guide);
-    if let Some(object) = hit {
-        let push = (object - end).normalize_or_zero() * 0.3;
-        let from = DVec3::new(object.x, r, object.y).as_vec3();
-        gizmos.line(
-            from,
-            from + DVec3::new(push.x, 0.0, push.y).as_vec3(),
-            Color::srgba(1.0, 0.85, 0.4, 0.7),
-        );
+    gizmos.line(centre, at(end), palette.guide);
+    gizmos.circle(flat(at(end)), r as f32, palette.guide);
+    if *assists == Assists::Assisted
+        && let Some(object) = hit
+    {
+        // Object ball leaves along the line of centres; a stun cue ball
+        // leaves along the tangent, on the side it was not pushed to.
+        let out = (object - end).normalize_or_zero();
+        gizmos.line(at(object), at(object + out * 0.3), palette.guide_accent);
+        let tangent = out.perp() * out.perp().dot(aim.direction).signum();
+        gizmos.line(at(end), at(end + tangent * 0.2), palette.guide_accent);
     }
 }
 

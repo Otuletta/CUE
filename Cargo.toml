@@ -15,6 +15,7 @@ publish = false
 cue-core = { path = "crates/cue-core" }
 cue-physics = { path = "crates/cue-physics" }
 cue-game = { path = "crates/cue-game" }
+cue-audio = { path = "crates/cue-audio" }
 
 # Math: pinned to the glam line Bevy 0.20 uses, so physics state converts to
 # render transforms without a second math library in the binary.
@@ -29,6 +30,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
 wasm-bindgen = "0.2.129"
 js-sys = "0.3.106"
+web-sys = "0.3.106"
 
 # Testing
 approx = "0.5.1"

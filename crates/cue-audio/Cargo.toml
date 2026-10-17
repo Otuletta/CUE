@@ -1,0 +1,11 @@
+[package]
+name = "cue-audio"
+description = "Procedural modal synthesis of CUE's impact sounds. No audio assets, no dependencies."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

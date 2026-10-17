@@ -57,6 +57,14 @@ default; versioned file names would allow long-lived caching.
 From the public URL, desktop Chromium on a fast connection: first frame
 **716 ms** after clicking Play, 120 engine frames per second, empty console.
 
+### Later phases
+
+| Phase | Engine `.wasm` (Brotli) | Added |
+|---|---:|---|
+| 1 | 4.11 MiB | baseline after trimming |
+| 2 | 4.12 MiB | pockets, Han cushions, throw, squirt, shot reports (+11 KiB) |
+| 3 | 4.14 MiB | procedural audio, command bridge (+14 KiB); the JS control layer adds ≈ 14 KiB |
+
 ## Runtime
 
 | Metric | Result |

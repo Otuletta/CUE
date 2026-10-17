@@ -4,12 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>CUE — vanilla host</title>
+    <meta name="description" content="CUE: a billiards engine in Rust and WebAssembly, embedded with one ES module." />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <header>
       <h1>CUE</h1>
-      <p>Independent host page: plain HTML and one ES module. Nothing loads until you press Play.</p>
+      <p>
+        A billiards engine in Rust, running in your browser through WebAssembly. This page is the
+        framework-free reference host: plain HTML and one ES module. Nothing loads until you press Play.
+      </p>
     </header>
 
     <main>
@@ -17,28 +21,23 @@
         <button id="play" class="play" type="button">Play</button>
       </div>
 
-      <p class="hint">
-        <strong>Touch:</strong> tap where you want to shoot, drag back towards the cue ball, release.
-        <strong>Mouse:</strong> point to aim, then press, drag back and release.
-        <strong>Keys:</strong> ←/→ aim, ↑/↓ power, Space shoot, WASD spin, R re-rack.
-        A release with almost no pull cancels the shot.
-      </p>
+      <details class="dev">
+        <summary>Developer tools</summary>
+        <div class="controls">
+          <button id="destroy" type="button" disabled>Destroy instance</button>
+          <a href="https://github.com/Otuletta/CUE">Source on GitHub</a>
+        </div>
 
-      <div class="controls" role="toolbar" aria-label="Game controls">
-        <button id="pause" type="button" disabled>Pause</button>
-        <button id="rerack" type="button" disabled>Re-rack</button>
-        <button id="destroy" type="button" disabled>Destroy</button>
-      </div>
+        <section class="metrics" aria-labelledby="metrics-title">
+          <h2 id="metrics-title">Measurements</h2>
+          <dl id="metrics"></dl>
+        </section>
 
-      <section class="metrics" aria-labelledby="metrics-title">
-        <h2 id="metrics-title">Measurements</h2>
-        <dl id="metrics"></dl>
-      </section>
-
-      <section aria-labelledby="log-title">
-        <h2 id="log-title">Events</h2>
-        <ol id="log" class="log" aria-live="polite"></ol>
-      </section>
+        <section aria-labelledby="log-title">
+          <h2 id="log-title">Events</h2>
+          <ol id="log" class="log"></ol>
+        </section>
+      </details>
     </main>
 
     <script type="module" src="./main.js"></script>

@@ -9,6 +9,7 @@ use bevy::{
 };
 
 use crate::{
+    settings::DevHud,
     shot::Aim,
     sim::{LastShot, Simulation},
 };
@@ -42,17 +43,31 @@ pub(crate) fn update(
     aim: Res<Aim>,
     diagnostics: Res<DiagnosticsStore>,
     last: Res<LastShot>,
+    dev: Res<DevHud>,
     window: Query<&Window, With<PrimaryWindow>>,
-    mut text: Query<&mut Text, With<HudText>>,
+    mut text: Query<(&mut Text, &mut Visibility), With<HudText>>,
 ) {
-    let Ok(mut text) = text.single_mut() else {
+    let Ok((mut text, mut visibility)) = text.single_mut() else {
         return;
     };
+    *visibility = if dev.0 {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    if !dev.0 {
+        return;
+    }
     let fps = diagnostics
         .get(&FrameTimeDiagnosticsPlugin::FPS)
         .and_then(|d| d.smoothed())
         .unwrap_or(0.0);
-    let state = if sim.world.is_at_rest() {
+    let state = if sim.in_hand() {
+        format!(
+            "ball in hand: drag it or use IJKL   power {:>3.0}%",
+            aim.power * 100.0
+        )
+    } else if sim.world.is_at_rest() {
         format!(
             "power {:>3.0}%   spin {:+.2} side {:+.2} height",
             aim.power * 100.0,
@@ -98,9 +113,9 @@ pub(crate) fn update(
         format!("{fps:>3.0} fps   {state}")
     } else {
         format!(
-            "CUE - phase 2   {fps:>3.0} fps{shot}\n{state}\n\
+            "CUE dev overlay (toggle: `)   {fps:>3.0} fps{shot}\n{state}\n\
              aim: pointer or left/right   power: drag back and release, or up/down + space\n\
-             spin: WASD (C centres)   re-rack: R   cancel: Esc or right click"
+             spin: WASD (C centres)   undo: U   re-rack: R   cancel: Esc or right click"
         )
     };
 }

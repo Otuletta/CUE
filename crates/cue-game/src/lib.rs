@@ -13,13 +13,15 @@ mod ball_texture;
 mod camera;
 mod hud;
 mod scene;
+mod settings;
 mod shot;
 mod sim;
 
 use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*};
 
-pub use shot::Aim;
-pub use sim::{Ball, Contact, LastShot, Paused, ShotFinished, Simulation};
+pub use settings::{Assists, DevHud, GameCommand, Theme};
+pub use shot::{Aim, MIN_SHOT_POWER};
+pub use sim::{Ball, Contact, GameEvent, LastShot, Paused, ShotFinished, Simulation};
 
 /// Everything CUE adds to a Bevy [`App`].
 #[derive(Debug, Default)]
@@ -39,8 +41,13 @@ impl Plugin for CuePlugin {
             .insert_resource(Simulation::new(1))
             .init_resource::<Paused>()
             .init_resource::<LastShot>()
+            .init_resource::<Theme>()
+            .init_resource::<Assists>()
+            .init_resource::<DevHud>()
             .add_message::<Contact>()
             .add_message::<ShotFinished>()
+            .add_message::<GameEvent>()
+            .add_message::<GameCommand>()
             .init_resource::<Aim>()
             .add_systems(
                 Startup,
@@ -49,6 +56,7 @@ impl Plugin for CuePlugin {
             .add_systems(
                 Update,
                 (
+                    shot::apply_commands,
                     shot::read_input,
                     sim::advance,
                     sim::after_shot,
@@ -58,6 +66,10 @@ impl Plugin for CuePlugin {
                     hud::update,
                 )
                     .chain(),
+            )
+            .add_systems(
+                PostUpdate,
+                settings::apply_theme.run_if(resource_changed::<Theme>),
             )
             .add_systems(Startup, (camera::spawn, hud::spawn));
     }
