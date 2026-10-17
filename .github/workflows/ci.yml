@@ -3,7 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+    # Documentation is not part of the build or the deployed demo.
+    paths-ignore: ['docs/**', '**/*.md']
   pull_request:
+    paths-ignore: ['docs/**', '**/*.md']
 
 permissions:
   contents: read

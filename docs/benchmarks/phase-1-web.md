@@ -44,6 +44,19 @@ no number before measuring. This one is acceptable for an opt-in "Play"
 button, but too large to preload on the portfolio home page, which the spec
 already forbids.
 
+### As served by GitHub Pages
+
+The live demo (`https://otuletta.github.io/CUE/`) is served with the correct
+`application/wasm` type, so browsers can compile while downloading. Pages
+compresses with **gzip only, never Brotli**, so visitors download about
+**6.7 MiB** (7,047,907 bytes), not 4.1 MiB. A host that serves Brotli
+(Cloudflare, Netlify, or the portfolio's own) would save about 39 %. This
+feeds the hosting choice in Phase 6. `Cache-Control: max-age=600` is Pages'
+default; versioned file names would allow long-lived caching.
+
+From the public URL, desktop Chromium on a fast connection: first frame
+**716 ms** after clicking Play, 120 engine frames per second, empty console.
+
 ## Runtime
 
 | Metric | Result |

@@ -2,6 +2,8 @@
 
 **A billiards engine written in Rust, running in the browser through WebAssembly.**
 
+**[▶ Live demo](https://otuletta.github.io/CUE/)**: the framework-free example host, deployed from every green build of `main`.
+
 CUE has two parts that ship together:
 
 - **A pool game** that runs inside a web page. There is no sign-up and no
@@ -25,7 +27,7 @@ CUE has two parts that ship together:
 - **Verified textbook behaviour:** 5/7 rolling speed after a stun shot, natural
   roll at a tip height of 2R/5, the 90° rule, follow and draw, and the rolling
   stopping distance.
-- **Browser build:** ≈ 4.1 MiB Brotli, 120 FPS on the reference desktop,
+- **Browser build:** ≈ 4.1 MiB Brotli (6.7 MiB gzip as GitHub Pages serves it), 120 FPS on the reference desktop,
   first frame under a second after clicking Play. Pausing stops the engine
   completely (0 frames). See the [measurements](docs/benchmarks/phase-1-web.md).
 - **Embedding API:** `createCue({ container })` with `on`, `pause`, `resume`,
