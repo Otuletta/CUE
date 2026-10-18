@@ -9,8 +9,48 @@ the physics profile id, even when no signature changes.
 
 ## [Unreleased]
 
+### Changed: shot outcomes (physics profile `baseline-2`)
+
+- **Breaks open the rack.** Full power is now 12 m/s, a strong real
+  break; it was 8. Racked balls now sit about half a millimetre apart,
+  varied by the rack's seed, instead of frozen. A square full-power break
+  now drives about 6 balls to a rail and pockets one most of the time,
+  where before it drove about 4 and rarely pocketed anything
+  (`docs/physics-model.md`, "The break").
+- The power slider's curve is `p²` instead of `p^1.6`, so soft and medium
+  shots keep their speeds.
+
 ### Added
 
+- **Animations:**
+  - a pocketed ball drops into its pocket instead of vanishing;
+  - the cue slides back in when the balls stop;
+  - the ball-in-hand ring breathes;
+  - banners for the break, each change of turn, fouls (with the reason) and
+    wins, and a burst of confetti for the win;
+  - each player's group shows as small balls in the scoreboard, which pop
+    and dim as they are pocketed.
+
+  Reduced motion turns them off.
+- **A fuller aiming guide:** the basic guide also shows a short stretch of
+  the object ball's path and the cue ball's tangent, or the bounce off the
+  first cushion. The assisted guide runs each path to its next contact.
+- **Pull to shoot:** on a wide stage the power slider stands at the side of
+  the table; pull it down and let go to shoot. `Enter` on the slider shoots.
+- **Fine aiming:**
+  - with the mouse, hold `Shift` and the aim turns a tenth as much as the
+    pointer moves;
+  - on any device, a ridged fine-aim strip in the dock that you drag
+    sideways, or turn with the arrow keys;
+  - `turnAim(radians)` for hosts' own controls, and `aimAngle` in the
+    state.
+
+  The aim now follows the mouse only when it moves, so a fine adjustment
+  stays put.
+- **Haptics:** a short pulse on the strike and on each pocketed ball, on
+  touch devices that can vibrate, while sound is on.
+- **Dialogs keep their way out in view:** on a small stage a long card
+  scrolls under its buttons instead of hiding them.
 - **Accessibility checks in the browser tests:**
   - an axe audit of every dialog and state, in English and Spanish;
   - focus trapping in dialogs, `Esc` and focus return;
@@ -21,6 +61,11 @@ the physics profile id, even when no signature changes.
   - decisions, turns and the call picker;
   - a stalemate;
   - free play's Undo and New rack.
+
+### Changed
+
+- The control layer's download budget is 40 KiB (was 35) for the features
+  above (`docs/benchmarks/phase-1-web.md`).
 
 ### Fixed
 

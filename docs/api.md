@@ -113,6 +113,7 @@ everything. A new instance needs a reload.
 | `shoot()` | Shoots with the current aim, power and spin. Ignored while balls move or below `minPower`. |
 | `setPower(power)` | `0..1`, as the slider. |
 | `setTip(x, y)` | The tip offset in ball radii: `x` is side spin, `y` follow (+) or draw (−). Clamped to the miscue limit. |
+| `turnAim(radians)` | Turns the aim by a small angle, counter-clockwise seen from above: fine aiming for your own controls. Ignored while balls move. |
 | `rerack()`, alias `reset()` | Free play: a new rack, undoable. |
 | `undo()` | Free play: undoes the last shot or re-rack. |
 
@@ -191,6 +192,7 @@ references into the engine.
 | Field | Meaning |
 |---|---|
 | `mode` | `free-play` or `eight-ball`. |
+| `aimAngle` | The aim on the table, radians: 0 points at the foot rail, π/2 at the near rail. |
 | `power`, `tipX`, `tipY` | The charged power and tip offset. |
 | `atRest`, `inHand`, `handRegion` | Whether balls are still; whether the cue ball can be moved, and where (`anywhere` or `above-head-string`). |
 | `canUndo`, `paused`, `shots`, `ballsInPlay`, `minPower` | |
@@ -240,5 +242,5 @@ The API follows SemVer (spec §26.3). A breaking change to a method, an
 option, an event, a code or the state's meaning needs a major version.
 
 A physics change that alters shot outcomes is visible behaviour even if no
-signature changes. It bumps the physics profile id (now `baseline-1`) and is
+signature changes. It bumps the physics profile id (now `baseline-2`) and is
 recorded in the [changelog](../CHANGELOG.md).

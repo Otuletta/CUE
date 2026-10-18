@@ -1,5 +1,6 @@
 //! Shared helpers for procedural textures: colour conversion, mip chains
-//! filtered in linear light, and the cloth's grain.
+//! filtered in linear light, the cloth's grain, the rails' wood and the
+//! pockets' depth.
 
 use bevy::{
     asset::RenderAssetUsages,
@@ -107,6 +108,57 @@ pub(crate) fn cloth_grain() -> Image {
     with_mips(n, n, base, true)
 }
 
+/// Size of the wood tile, texels: along the grain, then across it.
+pub(crate) const WOOD_SIZE: (u32, u32) = (512, 128);
+
+/// A tileable wood grain for the rails: growth rings, warped and stretched
+/// along the board, with fine streaks. Between about 62 % and 100 % of
+/// white, multiplied with the theme's wood colour by the material.
+pub(crate) fn wood_grain() -> Image {
+    let (w, h) = WOOD_SIZE;
+    let mut base = Vec::with_capacity((w * h) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let (u, v) = (x as f32 / w as f32, y as f32 / h as f32);
+            // The texture is four times longer than wide, so noise on a
+            // square lattice comes out stretched along the grain.
+            let warp = value_noise(u, v, 4) * 1.1 + value_noise(u, v, 16) * 0.25;
+            let ring = 0.5 + 0.5 * (std::f32::consts::TAU * (v * 10.0 + warp)).cos();
+            let streak = value_noise(u, v, 64) * 0.6 + value_noise(u, v, 128) * 0.4;
+            let shade = 0.62 + 0.22 * ring * ring + 0.16 * streak;
+            // A little warmer in the light rings, as in real timber.
+            base.push([
+                shade,
+                shade * (0.97 + 0.03 * ring),
+                shade * (0.94 + 0.06 * ring),
+            ]);
+        }
+    }
+    with_mips(w, h, base, true)
+}
+
+/// Side of the pocket texture, texels.
+const POCKET_SIZE: u32 = 64;
+
+/// The inside of a pocket seen from above: black in the middle, lifting to
+/// a dark brown at the rim, where the liner catches a little light.
+pub(crate) fn pocket_depth() -> Image {
+    let n = POCKET_SIZE;
+    let mut base = Vec::with_capacity((n * n) as usize);
+    for y in 0..n {
+        for x in 0..n {
+            let (dx, dy) = (
+                (x as f32 + 0.5) / n as f32 * 2.0 - 1.0,
+                (y as f32 + 0.5) / n as f32 * 2.0 - 1.0,
+            );
+            let r = (dx * dx + dy * dy).sqrt().min(1.0);
+            let lift = r.powi(4) * 0.05;
+            base.push([lift, lift * 0.75, lift * 0.55]);
+        }
+    }
+    with_mips(n, n, base, false)
+}
+
 /// Smooth value noise in `[0, 1]`, periodic over the unit square with
 /// `cells` lattice cells per side.
 fn value_noise(u: f32, v: f32, cells: u32) -> f32 {
@@ -156,6 +208,26 @@ mod tests {
         let level0 = &data[..(GRAIN_SIZE * GRAIN_SIZE * 4) as usize];
         let min = level0.chunks(4).map(|p| p[0]).min().unwrap();
         assert!(min > 235, "too dark: {min}");
+    }
+
+    #[test]
+    fn the_wood_tiles_and_keeps_its_range() {
+        let (w, h) = WOOD_SIZE;
+        let image = wood_grain();
+        let data = image.data.as_ref().unwrap();
+        let level0 = &data[..(w * h * 4) as usize];
+        let texel = |x: u32, y: u32| level0[((y * w + x) * 4) as usize];
+        for y in (0..h).step_by(8) {
+            // The last column runs into the first.
+            assert!(
+                texel(0, y).abs_diff(texel(w - 1, y)) < 24,
+                "seam at row {y}"
+            );
+        }
+        let (min, max) = level0
+            .chunks(4)
+            .fold((255, 0), |(lo, hi), p| (lo.min(p[0]), hi.max(p[0])));
+        assert!(min > 150 && max > 240, "range {min}–{max}");
     }
 
     #[test]

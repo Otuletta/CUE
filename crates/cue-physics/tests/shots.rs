@@ -110,7 +110,8 @@ fn follow_carries_the_cue_ball_forward_and_draw_pulls_it_back() {
         let mut w = world(&[(0, -0.6, 0.0), (1, 0.0, 0.0)]);
         w.strike(Strike {
             direction: DVec2::X,
-            power: 0.4,
+            // 3.2 m/s, a fraction of the profile's full power.
+            power: 3.2 / 12.0,
             tip_offset: DVec2::new(0.0, tip),
         })
         .unwrap();
@@ -248,6 +249,65 @@ fn break_moves_the_rack_and_settles() {
         end.iter()
             .all(|(_, s)| matches!(s.motion, Motion::Stationary | Motion::Pocketed))
     );
+}
+
+/// Object balls driven to a rail, pocketed, and moved more than 15 cm by a
+/// full-power break struck square on the apex ball.
+fn break_spread(seed: u64) -> (usize, usize, usize) {
+    let table = TableSpec::nine_foot();
+    let rack = eight_ball_rack(&table, seed).unwrap();
+    let mut w = World::new(PhysicsProfile::baseline(), &rack).unwrap();
+    w.strike(Strike::centre(DVec2::X, 1.0)).unwrap();
+    let mut rails = std::collections::BTreeSet::new();
+    let mut pocketed = 0;
+    let mut now = 0.0;
+    while !w.is_at_rest() {
+        now += 1.0 / 60.0;
+        w.advance_to(now).unwrap();
+        for e in w.drain_events() {
+            match e.kind {
+                SimEventKind::Cushion { ball, .. } if !ball.is_cue() => {
+                    rails.insert(ball);
+                }
+                SimEventKind::Pocketed { ball, .. } if !ball.is_cue() => pocketed += 1,
+                _ => {}
+            }
+        }
+    }
+    let moved = w
+        .sample(now)
+        .filter(|(id, s)| {
+            let start = rack.get(*id).unwrap();
+            !id.is_cue()
+                && (matches!(s.motion, Motion::Pocketed)
+                    || DVec2::new(s.position.x, s.position.z).distance(start) > 0.15)
+        })
+        .count();
+    (rails.len(), pocketed, moved)
+}
+
+#[test]
+fn a_full_power_break_opens_the_rack() {
+    // A real break spreads the rack and a good one drives four or more balls
+    // to a rail (WPA 4.3). A perfectly frozen rack or a slow cue ball keeps
+    // the pack together instead (docs/physics-model.md, "The break").
+    let seeds = 1..=20u64;
+    let n = seeds.clone().count() as f64;
+    let (mut rails, mut pocketed, mut moved) = (0, 0, 0);
+    for seed in seeds {
+        let (r, p, m) = break_spread(seed);
+        assert!(
+            r >= 4 || p > 0,
+            "rack {seed}: an illegal break ({r} to a rail)"
+        );
+        rails += r;
+        pocketed += p;
+        moved += m;
+    }
+    let (rails, pocketed, moved) = (rails as f64 / n, pocketed as f64 / n, moved as f64 / n);
+    assert!(rails >= 5.0, "{rails:.1} balls to a rail per break");
+    assert!(moved >= 7.5, "{moved:.1} balls moved per break");
+    assert!(pocketed >= 0.5, "{pocketed:.2} balls pocketed per break");
 }
 
 proptest! {

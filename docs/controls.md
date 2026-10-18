@@ -10,6 +10,7 @@ and with real HTML controls or the keyboard. Nothing *requires* the canvas
 | Action | Mouse | Touch |
 |---|---|---|
 | Aim | Move the pointer | Touch where the cue ball should go |
+| Fine aim | Hold `Shift` while moving: the aim turns a tenth as much | Drag the ridged **fine aim** strip in the dock sideways |
 | Power and shot | Press, drag **back** (away from the aim), release | Keep the finger down, drag towards the cue ball, release |
 | Cancel a shot | Release with almost no pull, `Esc`, or right click | Release with almost no pull |
 | Ball in hand | Press **on** the cue ball and drag it | Same |
@@ -21,9 +22,10 @@ by accident.
 
 | Control | What it does |
 |---|---|
+| Fine aim (ridged strip) | Drag it sideways to turn the aim by a twentieth of a degree per pixel; dragging right turns it clockwise. `←` `→` turn a quarter of a degree, a twentieth with `Shift`. |
 | Spin selector (white ball) | Drag the red dot to where the tip should strike. Arrow keys move it, `Home` or `0` centres it, double-click centres it. The dashed ring is the miscue limit. |
-| Power slider | Sets the power, like dragging back on the table. Native range input: arrows, Page Up/Down, Home/End. |
-| Shoot | Shoots with the current aim, power and spin. If the power is still at zero, it says so instead of firing. |
+| Power slider | Sets the power, like dragging back on the table. On a wide stage it stands at the side of the table: **pull it down and let go to shoot**, as pool games do; letting go with almost no power cancels. On a narrow stage it lies in the dock and only sets the power. Native range input: arrows, Page Up/Down, Home/End, and `Enter` shoots. |
+| Shoot | Shoots with the current aim, power and spin. If the power is still at zero, it says so instead of firing. On touch devices that can vibrate, the strike and each pocketed ball give a short pulse while sound is on. |
 | Toolbar | How to play · Undo (free play) · New game · Sound · Settings · Full screen · Pause · (Exit, if the host provides one) |
 | Call (eight-ball) | Shows the call for the next shot: ball, then the pocket lit on a tiny table, marked *auto* while it follows the aim. Opens the call dialog. |
 | Spot a ball (eight-ball) | Appears only when WPA 1.6 allows it: the cue ball in hand above the head string, and every legal ball above it too. |
@@ -114,8 +116,8 @@ Settings → Aiming guide:
 | Level | Shows |
 |---|---|
 | Off | Only the cue stick |
-| Basic | A line to the first ball or cushion, and a ghost ball |
-| Assisted | Also the object ball's path and the cue ball's stun tangent |
+| Basic | A line to the first ball or cushion and a ghost ball there, then a short stretch of what follows: the object ball's path and the cue ball's stun tangent, or the bounce off the cushion |
+| Assisted | The same, longer: each path runs to its next contact, up to 1.2 m |
 
 The guide is an estimate. It ignores spin, throw, squirt and curve, and says
 so in the settings.

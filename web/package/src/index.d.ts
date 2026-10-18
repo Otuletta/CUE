@@ -201,6 +201,8 @@ export interface MatchState {
 /** A read-only snapshot, refreshed every frame. */
 export interface CueState {
   mode: 'free-play' | 'eight-ball';
+  /** Aim direction on the table, radians: 0 towards the foot, π/2 towards the near rail. */
+  aimAngle: number;
   /** Charged power, 0–1. */
   power: number;
   /** Tip offset in ball radii: side, follow (+) or draw (−). */
@@ -335,6 +337,8 @@ export interface CueInstance {
   setPower(power: number): void;
   /** Tip offset in ball radii, within the miscue limit. */
   setTip(x: number, y: number): void;
+  /** Turns the aim by `radians`, counter-clockwise seen from above (fine aiming). */
+  turnAim(radians: number): void;
 
   newGame(setup?: MatchSetup): void;
   freePlay(): void;

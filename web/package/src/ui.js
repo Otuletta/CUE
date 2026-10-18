@@ -16,6 +16,10 @@ import { STYLES } from './styles.js';
 const TOAST_MS = 2600;
 const MAX_TIP = 0.5;
 const SPIN_STEP = 0.05;
+/** Fine aim: radians per pixel dragged on the jog strip (0.05°). */
+const JOG_RADIANS_PER_PX = 0.000873;
+/** Fine aim: radians per arrow key press on the jog strip (0.25°; Shift 0.05°). */
+const JOG_KEY_STEP = 0.004363;
 
 const coarsePointer = () => window.matchMedia?.('(pointer: coarse)').matches ?? false;
 const escape = (s) =>
@@ -26,7 +30,7 @@ const escape = (s) =>
  * @param {object} deps
  */
 export function createOverlay(root, deps) {
-  const { t, locale, api, settings, onExit, fallbackUrl, rulesUrl } = deps;
+  const { t, locale, api, settings, onExit, fallbackUrl, rulesUrl, reducedMotion } = deps;
   const host = document.createElement('div');
   host.className = 'cue-overlay';
   Object.assign(host.style, { position: 'absolute', inset: '0', pointerEvents: 'none' });
@@ -42,6 +46,7 @@ export function createOverlay(root, deps) {
   const power = $('input[name="power"]');
   const powerOut = $('.power output');
   const spin = $('.spin');
+  const jog = $('.jog');
   const dot = $('.spin .dot');
   const shootBtn = $('[data-action="shoot"]');
   const button = (action) => $(`[data-action="${action}"]`);
@@ -158,6 +163,52 @@ export function createOverlay(root, deps) {
     api.shoot();
   }
 
+  // --- Banners and celebration ---------------------------------------------
+  // Big, brief and visual only: the live region already says it in full.
+
+  const motionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+  const still = () => reducedMotion ?? Boolean(motionQuery?.matches);
+  if (reducedMotion) ui.dataset.reducedMotion = '';
+  const bannerEl = $('.banner');
+  let bannerTimers = [];
+  function banner(kind, title, sub = '') {
+    bannerTimers.forEach(clearTimeout);
+    bannerEl.dataset.kind = kind;
+    bannerEl.querySelector('strong').textContent = title;
+    bannerEl.querySelector('span').textContent = sub;
+    bannerEl.querySelector('span').hidden = !sub;
+    bannerEl.removeAttribute('data-visible');
+    bannerEl.removeAttribute('data-leaving');
+    void bannerEl.offsetWidth; // restart the entrance
+    bannerEl.setAttribute('data-visible', '');
+    const stay = kind === 'win' ? 2600 : 1500;
+    bannerTimers = [
+      setTimeout(() => bannerEl.setAttribute('data-leaving', ''), stay),
+      setTimeout(() => {
+        bannerEl.removeAttribute('data-visible');
+        bannerEl.removeAttribute('data-leaving');
+      }, stay + 350),
+    ];
+  }
+
+  const confettiEl = $('.confetti');
+  const CONFETTI = ['#f2c12e', '#2c5bd8', '#d22b2b', '#5c2485', '#f57014', '#0f753d', '#ffffff'];
+  function celebrate() {
+    if (still()) return;
+    confettiEl.replaceChildren(
+      ...Array.from({ length: 48 }, (_, i) => {
+        const bit = document.createElement('i');
+        bit.style.setProperty('--x', `${(i * 37) % 100}%`);
+        bit.style.setProperty('--drift', `${((i * 53) % 61) - 30}px`);
+        bit.style.setProperty('--delay', `${(i % 12) * 45}ms`);
+        bit.style.setProperty('--turn', `${(i * 97) % 720}deg`);
+        bit.style.background = CONFETTI[i % CONFETTI.length];
+        return bit;
+      }),
+    );
+    setTimeout(() => confettiEl.replaceChildren(), 3200);
+  }
+
   const match = createMatch(shadow, {
     t,
     locale,
@@ -166,6 +217,8 @@ export function createOverlay(root, deps) {
     open,
     close,
     announce,
+    banner,
+    celebrate,
     openSheet: () => openSheet,
     focusTable: () => canvas()?.focus({ preventScroll: true }),
   });
@@ -248,7 +301,25 @@ export function createOverlay(root, deps) {
   // --- Power and spin -------------------------------------------------------
 
   power.addEventListener('pointerdown', () => (draggingPower = true));
-  power.addEventListener('pointerup', () => (draggingPower = false));
+  // On wide stages the slider stands at the side of the table: pull it down
+  // and let go to shoot, as pool games do. Letting go with almost no power
+  // cancels, as on the table. A horizontal slider (narrow stages) only sets
+  // the power; Shoot fires.
+  const pullToShoot = () => getComputedStyle(power).writingMode.startsWith('vertical');
+  power.addEventListener('pointerup', () => {
+    if (draggingPower && pullToShoot()) {
+      if ((askedPower ?? snapshot?.power ?? 0) >= (snapshot?.minPower ?? 0.03)) shoot();
+      else api.setPower(0);
+    }
+    draggingPower = false;
+  });
+  power.addEventListener('pointercancel', () => (draggingPower = false));
+  power.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      shoot();
+      e.preventDefault();
+    }
+  });
   power.addEventListener('blur', () => (draggingPower = false));
   power.addEventListener('input', () => {
     powerOut.value = `${power.value}%`;
@@ -305,6 +376,54 @@ export function createOverlay(root, deps) {
       e.stopPropagation();
     }
   });
+
+  // --- Fine aim -----------------------------------------------------------
+  // A jog strip: dragging it turns the aim by a small angle per pixel, so a
+  // finger can aim as finely as the keyboard. Its ridges slide along to show
+  // the movement.
+
+  let jogFrom = null;
+  let jogShift = 0;
+  const turn = (radians) => {
+    api.turnAim(radians);
+    jogShift = (jogShift - radians / JOG_RADIANS_PER_PX) % 24;
+    jog.style.setProperty('--shift', `${jogShift}px`);
+  };
+  jog.addEventListener('pointerdown', (e) => {
+    jog.setPointerCapture(e.pointerId);
+    jogFrom = e.clientX;
+  });
+  jog.addEventListener('pointermove', (e) => {
+    if (jogFrom === null || !jog.hasPointerCapture(e.pointerId)) return;
+    // Dragging right turns the aim clockwise on screen, as a wheel would.
+    turn(-(e.clientX - jogFrom) * JOG_RADIANS_PER_PX);
+    jogFrom = e.clientX;
+  });
+  const endJog = () => (jogFrom = null);
+  jog.addEventListener('pointerup', endJog);
+  jog.addEventListener('pointercancel', endJog);
+  jog.addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? JOG_KEY_STEP / 5 : JOG_KEY_STEP;
+    const by = { ArrowLeft: step, ArrowRight: -step }[e.key];
+    if (by !== undefined) {
+      turn(by);
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+
+  // --- Haptics ------------------------------------------------------------
+  // A short pulse on the strike and on each ball pocketed, on touch devices
+  // that can vibrate. It follows the sound setting: both are feedback.
+  const coarse = window.matchMedia?.('(pointer: coarse)');
+  const pulse = (ms) => {
+    if (!coarse?.matches || !settings.get().sound.enabled) return;
+    try {
+      navigator.vibrate?.(ms);
+    } catch {
+      // Not allowed here (no gesture yet, or a policy): stay silent.
+    }
+  };
 
   // --- Settings dialog ----------------------------------------------------
 
@@ -449,6 +568,8 @@ export function createOverlay(root, deps) {
     },
     /** Reacts to engine events with feedback a player can see and hear. */
     onEvent(name, detail) {
+      if (name === 'shot-start') pulse(18);
+      else if (name === 'ball-pocketed' && detail?.ballId !== 0) pulse(8);
       if (match.onEvent(name, detail)) return;
       if (name === 'shot-end' && detail && !detail.abandoned) {
         const balls = detail.pocketed.filter((p) => p.ballId !== 0).map((p) => t.ball(p.ballId));
@@ -533,10 +654,13 @@ function markup(t, { exit, locale, rulesUrl }) {
   </div>
 
   <div class="toast" aria-hidden="true"></div>
+  <div class="banner" aria-hidden="true"><strong></strong><span></span></div>
+  <div class="confetti" aria-hidden="true"></div>
   <div class="sr" role="status" aria-live="polite"></div>
 
   <div class="dock">
     ${dockMarkup(t)}
+    <div class="jog" role="slider" tabindex="0" aria-label="${escape(t.fineAim)}" aria-valuetext="${escape(t.fineAimHint)}" title="${escape(t.fineAim)}"><span class="ridges" aria-hidden="true"></span></div>
     <div class="spin" role="slider" tabindex="0" aria-label="${escape(t.spin)}" aria-valuetext="${escape(t.spinValue(0, 0))}" title="${escape(t.spin)}"><span class="dot"></span></div>
     <label class="power"><span>${escape(t.power)}</span><input type="range" name="power" min="0" max="100" step="1" value="0"><output>0%</output></label>
     <button type="button" class="shoot" data-action="shoot">${escape(t.shoot)}</button>

@@ -71,6 +71,15 @@ to the middle of the free band. The move uses an **off-axis projection**
 (Bevy's sub camera view), so the viewing direction, and with it aiming, is
 unchanged. Pointer rays use the same matrix.
 
+> **Amended (2026-10-18), lighting and materials:** the table is now lit
+> by a pool-table lamp. Three shades hang over the playing surface as spot
+> lights without shadows, which would cost a shadow map each on WebGL2.
+> They brighten the middle of the cloth, leave the room dim, and put the
+> shades' highlights on every ball. The key light below stays, softer, for
+> the contact shadows. The rails are varnished wood with a procedural
+> grain, the pockets have leather lips and dark drops, and a table body
+> and a floor stand under it, all generated in code like the rest.
+
 ### Shadows fitted to the table
 
 On WebGL2, Bevy has a single shadow cascade, which by default spreads over

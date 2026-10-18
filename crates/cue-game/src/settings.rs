@@ -78,8 +78,10 @@ impl Theme {
             Self::Classic => Palette {
                 cloth: Color::srgb(0.06, 0.30, 0.24),
                 cushion: Color::srgb(0.05, 0.25, 0.20),
-                wood: Color::srgb(0.16, 0.09, 0.05),
+                // Walnut, under the grain texture's 62–100 % shading.
+                wood: Color::srgb(0.30, 0.17, 0.095),
                 leather: Color::srgb(0.035, 0.03, 0.03),
+                floor: Color::srgb(0.2, 0.14, 0.1),
                 background: Color::srgb(0.035, 0.037, 0.045),
                 guide: Color::srgba(1.0, 1.0, 1.0, 0.55),
                 guide_accent: Color::srgba(1.0, 0.85, 0.4, 0.75),
@@ -88,20 +90,24 @@ impl Theme {
             Self::Studio => Palette {
                 cloth: Color::srgb(0.05, 0.20, 0.36),
                 cushion: Color::srgb(0.04, 0.16, 0.30),
-                wood: Color::srgb(0.055, 0.055, 0.06),
+                // Dark espresso wood.
+                wood: Color::srgb(0.22, 0.14, 0.095),
                 leather: Color::srgb(0.02, 0.02, 0.022),
+                floor: Color::srgb(0.14, 0.14, 0.15),
                 background: Color::srgb(0.03, 0.032, 0.04),
                 guide: Color::srgba(1.0, 1.0, 1.0, 0.6),
                 guide_accent: Color::srgba(0.55, 0.85, 1.0, 0.8),
                 guide_width: 2.0,
             },
             Self::Contrast => Palette {
-                // Renders mid-grey under the key light: equally far from the
-                // black eight and the ivory cue ball.
+                // Renders about mid-grey under the lamp (sRGB 130 in the
+                // middle, 80 in the corners): far from both the black eight
+                // and the ivory cue ball everywhere.
                 cloth: Color::srgb(0.30, 0.32, 0.35),
                 cushion: Color::srgb(0.20, 0.22, 0.25),
                 wood: Color::srgb(0.02, 0.02, 0.02),
                 leather: Color::srgb(0.0, 0.0, 0.0),
+                floor: Color::srgb(0.0, 0.0, 0.0),
                 background: Color::srgb(0.0, 0.0, 0.0),
                 guide: Color::srgba(1.0, 0.92, 0.0, 1.0),
                 guide_accent: Color::srgba(1.0, 0.35, 0.9, 1.0),
@@ -118,6 +124,8 @@ pub(crate) struct Palette {
     pub(crate) cushion: Color,
     pub(crate) wood: Color,
     pub(crate) leather: Color,
+    /// The room's floor, under and around the table.
+    pub(crate) floor: Color,
     pub(crate) background: Color,
     pub(crate) guide: Color,
     pub(crate) guide_accent: Color,
@@ -131,6 +139,7 @@ pub(crate) struct TableMaterials {
     pub(crate) cushion: Handle<StandardMaterial>,
     pub(crate) wood: Handle<StandardMaterial>,
     pub(crate) leather: Handle<StandardMaterial>,
+    pub(crate) floor: Handle<StandardMaterial>,
 }
 
 /// Whether the developer overlay (frame rate, state) is visible.
@@ -145,6 +154,13 @@ pub enum GameCommand {
     SetPower(f64),
     /// Shoot with the current aim, power and tip.
     Shoot,
+    /// Turn the aim by this many radians, counter-clockwise seen from
+    /// above: fine aiming from the host's controls.
+    TurnAim(f64),
+    /// Whether `Shift` is held during pointer moves, as the page sees it.
+    /// The engine sees keys only while the canvas has focus; the page sees
+    /// the modifier on every pointer event.
+    SetFineAim(bool),
     /// Set the tip offset in ball radii; clamped to the miscue limit.
     SetTip(DVec2),
     /// Undo the last shot or re-rack (free play only).
@@ -199,6 +215,7 @@ pub(crate) fn apply_theme(
         (&handles.cushion, palette.cushion),
         (&handles.wood, palette.wood),
         (&handles.leather, palette.leather),
+        (&handles.floor, palette.floor),
     ] {
         if let Some(mut m) = materials.get_mut(handle) {
             m.base_color = colour;

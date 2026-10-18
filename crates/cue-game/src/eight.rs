@@ -694,7 +694,8 @@ mod tests {
         session.call = call;
         let draw = Strike {
             direction: line,
-            power: 0.3,
+            // 2.4 m/s: a soft draw that stops the cue ball short of the pocket.
+            power: 0.2,
             tip_offset: DVec2::new(0.0, -0.4),
         };
         let ruling = shoot(&mut session, &mut sim, draw);

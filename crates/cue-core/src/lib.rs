@@ -28,7 +28,7 @@ mod table;
 pub use ball::{BallGroup, BallId};
 pub use error::CoreError;
 pub use pocket::{PocketId, PocketSpec};
-pub use rack::{Layout, RACK_GAP, eight_ball_rack};
+pub use rack::{Layout, RACK_GAP, RACK_SPACING, eight_ball_rack};
 pub use rail::Rail;
 pub use report::{SIMULTANEOUS, ShotEvent, ShotEventKind, ShotReport};
 pub use rng::SplitMix64;
