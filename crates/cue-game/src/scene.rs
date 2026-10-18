@@ -30,12 +30,27 @@ const CUSHION_HEIGHT: f32 = 0.044;
 const RAIL_HEIGHT: f32 = 0.05;
 /// Height of the pocket surround (the leather around the hole), metres.
 const POCKET_HEIGHT: f32 = 0.02;
+/// Width and height of the leather lip round each pocket, metres.
+const POCKET_LIP: f32 = 0.006;
 /// One repeat of the cloth grain, metres.
 const GRAIN_TILE: f32 = 0.25;
+/// One repeat of the rails' wood, along and across the grain, metres.
+const WOOD_TILE: Vec2 = Vec2::new(0.9, 0.225);
 /// Half-diagonals of a diamond sight, across and along its rail, metres.
 const DIAMOND: (f32, f32) = (0.009, 0.005);
 /// Radius of the foot-spot mark, metres.
 const SPOT_RADIUS: f32 = 0.006;
+/// Height of the lamp's shades above the cloth, metres.
+const LAMP_HEIGHT: f32 = 1.0;
+/// Along the table, where the lamp's three shades hang, metres from centre.
+const LAMP_SHADES: [f32; 3] = [-0.75, 0.0, 0.75];
+/// Luminous power of each shade, lumens. Together they light the middle of
+/// the cloth to about the key light's level and let the corners and the room
+/// fall into shadow.
+const LAMP_LUMENS: f32 = 70_000.0;
+/// The table's body below the rails, and the floor, metres below the cloth.
+const BODY_DEPTH: f32 = 0.2;
+const FLOOR_DEPTH: f32 = 0.76;
 /// Farthest distance from the camera that receives shadows, metres. Bevy's
 /// default spreads WebGL2's single shadow cascade over 150 m, too coarse for
 /// a ball's shadow; the camera is never farther than a few metres away.
@@ -80,16 +95,25 @@ pub(crate) fn spawn_table(
         ..default()
     });
     let cushion = material(&mut materials, palette.cushion, 0.9);
-    let wood = material(&mut materials, palette.wood, 0.45);
-    let leather = material(&mut materials, palette.leather, 0.7);
+    // Varnished: the lamp's shades glide along the rails.
+    let wood = materials.add(StandardMaterial {
+        base_color: palette.wood,
+        base_color_texture: Some(images.add(textures::wood_grain())),
+        perceptual_roughness: 0.42,
+        reflectance: 0.3,
+        ..default()
+    });
+    let leather = material(&mut materials, palette.leather, 0.55);
+    let floor = material(&mut materials, palette.floor, 0.85);
     commands.insert_resource(TableMaterials {
         cloth: cloth.clone(),
         cushion: cushion.clone(),
         wood: wood.clone(),
         leather: leather.clone(),
+        floor: floor.clone(),
     });
     let hole = materials.add(StandardMaterial {
-        base_color: Color::BLACK,
+        base_color_texture: Some(images.add(textures::pocket_depth())),
         unlit: true,
         ..default()
     });
@@ -121,6 +145,20 @@ pub(crate) fn spawn_table(
         &cloth,
         Vec3::new(0.0, -0.015, 0.0),
     );
+    // The body under the rails, so the table stands on something, and the
+    // floor of a dim room around it.
+    spawn(
+        Cuboid::new(2.0 * rim.x, BODY_DEPTH, 2.0 * rim.y)
+            .mesh()
+            .build(),
+        &wood,
+        Vec3::new(0.0, -0.03 - BODY_DEPTH / 2.0, 0.0),
+    );
+    spawn(
+        Plane3d::default().mesh().size(14.0, 14.0).build(),
+        &floor,
+        Vec3::new(0.0, -FLOOR_DEPTH, 0.0),
+    );
 
     for (outline, segment) in geometry.cushion_outlines().iter().zip(
         geometry
@@ -131,10 +169,16 @@ pub(crate) fn spawn_table(
         // Cushion rubber, exactly over the collision outline.
         let quad = outline.map(flat);
         spawn(prism(&quad, 0.0, CUSHION_HEIGHT), &cushion, Vec3::ZERO);
-        // Wood behind it, from the back of the cushion to the rim.
-        let out = -flat(segment.normal) * RAIL_WIDTH;
+        // Wood behind it, from the back of the cushion to the rim, with the
+        // grain along the rail.
+        let normal = flat(segment.normal);
+        let out = -normal * RAIL_WIDTH;
         let back = [quad[3], quad[2], quad[2] + out, quad[3] + out];
-        spawn(prism(&back, 0.0, RAIL_HEIGHT), &wood, Vec3::ZERO);
+        spawn(
+            prism_mapped(&back, 0.0, RAIL_HEIGHT, normal.perp(), WOOD_TILE),
+            &wood,
+            Vec3::ZERO,
+        );
     }
 
     // Pocket surrounds fill the gaps the rail sections leave, and a black
@@ -166,15 +210,30 @@ pub(crate) fn spawn_table(
                 Vec2::new(ends[0].x, sz * rim.y),
             ]
         };
-        spawn(prism(&surround, 0.0, POCKET_HEIGHT), &leather, Vec3::ZERO);
-        let centre = flat(pocket.centre);
+        // The rail's wood runs round the pocket, a little lower, as on a
+        // real table; only the lip is leather.
         spawn(
-            Cylinder::new(pocket.radius as f32, 0.001)
-                .mesh()
-                .resolution(48)
-                .build(),
+            prism_mapped(&surround, 0.0, POCKET_HEIGHT, Vec2::X, WOOD_TILE),
+            &wood,
+            Vec3::ZERO,
+        );
+        // The drop, dark towards its middle, inside a leather lip that
+        // catches the lamp.
+        let centre = flat(pocket.centre);
+        let radius = pocket.radius as f32;
+        spawn(
+            Cylinder::new(radius, 0.001).mesh().resolution(48).build(),
             &hole,
             Vec3::new(centre.x, POCKET_HEIGHT + 0.0005, centre.y),
+        );
+        spawn(
+            Extrusion::new(Annulus::new(radius, radius + POCKET_LIP), POCKET_LIP)
+                .mesh()
+                .resolution(48)
+                .build()
+                .rotated_by(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+            &leather,
+            Vec3::new(centre.x, POCKET_HEIGHT + POCKET_LIP / 2.0, centre.y),
         );
     }
 
@@ -222,11 +281,31 @@ pub(crate) fn spawn_table(
         Vec3::new(foot.x, 0.0002, foot.y),
     );
 
-    // A soft key light from above, as over a real table, with its shadow
-    // cascade fitted to the table rather than to a landscape.
+    // A pool-table lamp: three shades over the playing surface. They light
+    // the middle of the cloth more than its corners, give each ball the
+    // shades' highlights, and leave the room dim. They cast no shadows, which
+    // would cost a shadow map each on WebGL2.
+    for x in LAMP_SHADES {
+        commands.spawn((
+            SpotLight {
+                color: Color::srgb(1.0, 0.95, 0.87),
+                intensity: LAMP_LUMENS,
+                range: 4.0,
+                radius: 0.1,
+                shadow_maps_enabled: false,
+                inner_angle: 0.55,
+                outer_angle: 1.05,
+                ..default()
+            },
+            Transform::from_xyz(x, LAMP_HEIGHT, 0.0).looking_at(Vec3::new(x, 0.0, 0.0), Vec3::X),
+        ));
+    }
+
+    // A soft key light from above, for the balls' contact shadows, with its
+    // shadow cascade fitted to the table rather than to a landscape.
     commands.spawn((
         DirectionalLight {
-            illuminance: 9_000.0,
+            illuminance: 3_500.0,
             shadow_maps_enabled: true,
             ..default()
         },
@@ -246,34 +325,57 @@ pub(crate) fn spawn_table(
 /// to `top`. Flat-shaded; winding is fixed up from the geometry, so the
 /// outline may be given in either orientation.
 fn prism(outline: &[Vec2], bottom: f32, top: f32) -> Mesh {
+    prism_mapped(outline, bottom, top, Vec2::X, Vec2::ONE)
+}
+
+/// [`prism`] with texture coordinates: `u` runs along `along` and `v`
+/// across it on the top face, and round the outline and up on the sides,
+/// one repeat per `tile` metres.
+fn prism_mapped(outline: &[Vec2], bottom: f32, top: f32, along: Vec2, tile: Vec2) -> Mesh {
     let centre = outline.iter().copied().sum::<Vec2>() / outline.len() as f32;
     let centre3 = Vec3::new(centre.x, (top + bottom) / 2.0, centre.y);
+    let across = along.perp();
     let mut positions: Vec<[f32; 3]> = Vec::new();
     let mut normals: Vec<[f32; 3]> = Vec::new();
+    let mut uvs: Vec<[f32; 2]> = Vec::new();
     // Each triangle is emitted so that its normal points away from the
     // prism's centre.
-    let mut triangle = |a: Vec3, b: Vec3, c: Vec3| {
+    let mut triangle = |corners: [(Vec3, Vec2); 3]| {
+        let [(a, ua), (mut b, mut ub), (mut c, mut uc)] = corners;
         let mut n = (b - a).cross(c - a).normalize_or_zero();
-        let (b, c) = if n.dot((a + b + c) / 3.0 - centre3) < 0.0 {
+        if n.dot((a + b + c) / 3.0 - centre3) < 0.0 {
             n = -n;
-            (c, b)
-        } else {
-            (b, c)
-        };
-        for p in [a, b, c] {
+            (b, c) = (c, b);
+            (ub, uc) = (uc, ub);
+        }
+        for (p, uv) in [(a, ua), (b, ub), (c, uc)] {
             positions.push(p.to_array());
             normals.push(n.to_array());
+            uvs.push(uv.to_array());
         }
     };
     let up = |p: Vec2| Vec3::new(p.x, top, p.y);
     let down = |p: Vec2| Vec3::new(p.x, bottom, p.y);
+    let plan = |p: Vec2| Vec2::new(p.dot(along), p.dot(across)) / tile;
     for i in 1..outline.len() - 1 {
-        triangle(up(outline[0]), up(outline[i]), up(outline[i + 1]));
+        let [p, q, r] = [outline[0], outline[i], outline[i + 1]];
+        triangle([(up(p), plan(p)), (up(q), plan(q)), (up(r), plan(r))]);
     }
+    // The sides unroll round the outline, so the grain wraps the edge.
+    let mut run = 0.0;
     for i in 0..outline.len() {
         let (p, q) = (outline[i], outline[(i + 1) % outline.len()]);
-        triangle(down(p), down(q), up(q));
-        triangle(down(p), up(q), up(p));
+        let next = run + p.distance(q);
+        let side = |s: f32, y: f32| Vec2::new(s / tile.x, y / tile.y);
+        let (pb, qb, qt, pt) = (
+            side(run, bottom),
+            side(next, bottom),
+            side(next, top),
+            side(run, top),
+        );
+        triangle([(down(p), pb), (down(q), qb), (up(q), qt)]);
+        triangle([(down(p), pb), (up(q), qt), (up(p), pt)]);
+        run = next;
     }
     let count = positions.len() as u32;
     Mesh::new(
@@ -282,7 +384,7 @@ fn prism(outline: &[Vec2], bottom: f32, top: f32) -> Mesh {
     )
     .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0f32, 0.0]; count as usize])
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
     .with_inserted_indices(Indices::U32((0..count).collect()))
 }
 

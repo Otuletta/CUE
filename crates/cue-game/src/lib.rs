@@ -42,7 +42,8 @@ impl Plugin for CuePlugin {
         app.insert_resource(ClearColor(Color::srgb(0.035, 0.037, 0.045)))
             .insert_resource(GlobalAmbientLight {
                 color: Color::WHITE,
-                brightness: 250.0,
+                // Low: the lamp lights the table and the room stays dim.
+                brightness: 120.0,
                 affects_lightmapped_meshes: true,
             })
             .insert_resource(Simulation::new(1))
