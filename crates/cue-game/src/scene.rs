@@ -30,8 +30,11 @@ const CUSHION_HEIGHT: f32 = 0.044;
 const RAIL_HEIGHT: f32 = 0.05;
 /// Height of the pocket surround (the leather around the hole), metres.
 const POCKET_HEIGHT: f32 = 0.02;
-/// Width and height of the leather lip round each pocket, metres.
+/// Width and height of the brass lip round each pocket, metres.
 const POCKET_LIP: f32 = 0.006;
+/// Distance from the cushion and width of the brass inlay on the rails, and
+/// how far it stands proud of the wood, metres.
+const INLAY: (f32, f32) = (0.004, 0.0004);
 /// One repeat of the cloth grain, metres.
 const GRAIN_TILE: f32 = 0.25;
 /// One repeat of the rails' wood, along and across the grain, metres.
@@ -104,6 +107,13 @@ pub(crate) fn spawn_table(
         ..default()
     });
     let leather = material(&mut materials, palette.leather, 0.55);
+    // Polished brass for the pocket lips and the sight line along the rails.
+    let brass = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.86, 0.68, 0.38),
+        metallic: 1.0,
+        perceptual_roughness: 0.28,
+        ..default()
+    });
     let floor = material(&mut materials, palette.floor, 0.85);
     commands.insert_resource(TableMaterials {
         cloth: cloth.clone(),
@@ -179,6 +189,19 @@ pub(crate) fn spawn_table(
             &wood,
             Vec3::ZERO,
         );
+        // A thin brass line inlaid where the wood meets the cushion.
+        let inlay = -normal * INLAY.0;
+        let line = [
+            quad[3] + inlay,
+            quad[2] + inlay,
+            quad[2] + inlay * 2.0,
+            quad[3] + inlay * 2.0,
+        ];
+        spawn(
+            prism(&line, RAIL_HEIGHT, RAIL_HEIGHT + INLAY.1),
+            &brass,
+            Vec3::ZERO,
+        );
     }
 
     // Pocket surrounds fill the gaps the rail sections leave, and a black
@@ -232,7 +255,7 @@ pub(crate) fn spawn_table(
                 .resolution(48)
                 .build()
                 .rotated_by(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-            &leather,
+            &brass,
             Vec3::new(centre.x, POCKET_HEIGHT + POCKET_LIP / 2.0, centre.y),
         );
     }
@@ -406,8 +429,12 @@ pub(crate) fn spawn_balls(
             Mesh3d(mesh.clone()),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color_texture: Some(images.add(ball_texture::ball_image(id))),
-                perceptual_roughness: 0.12,
-                reflectance: 0.6,
+                // Lacquered: a slightly soft resin under a hard, clear coat,
+                // which carries the lamp's sharp reflections.
+                perceptual_roughness: 0.2,
+                reflectance: 0.55,
+                clearcoat: 1.0,
+                clearcoat_perceptual_roughness: 0.06,
                 ..default()
             })),
             Transform::from_translation(state.position.as_vec3())

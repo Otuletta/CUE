@@ -335,28 +335,76 @@ pub(crate) fn after_shot(
 }
 
 /// Moves and spins every ball mesh to the simulated state at `clock`.
-/// How long a pocketed ball takes to drop out of sight, seconds.
-const SINK_TIME: f32 = 0.38;
+/// How a pocketed ball goes: it rolls on to the middle of the pocket the way
+/// it was going, for between these many seconds, then drops for this long.
+const ROLL_IN: (f32, f32) = (0.1, 0.32);
+const DROP_TIME: f32 = 0.42;
 
-/// A ball on its way down a pocket: from where it was last drawn to below
-/// the pocket's centre.
+/// A ball on its way into a pocket.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Sink {
+    /// Where it was last drawn.
     from: Vec3,
+    /// The curve's control point, along its last direction of travel.
+    bend: Vec3,
+    /// The middle of the pocket, at ball height.
     to: Vec3,
+    /// How long it rolls before it drops, seconds.
+    roll: f32,
+    /// The spin it had, so the markings keep turning as it rolls in.
+    spin: Vec3,
     elapsed: f32,
 }
 
-/// Where a ball sinking for `t` of [`SINK_TIME`] is drawn, and its scale:
-/// it slides to the middle of the pocket while it falls, faster and faster,
-/// and shrinks a little into the dark.
-pub(crate) fn sink_pose(sink: &Sink, t: f32) -> (Vec3, f32) {
-    let t = t.clamp(0.0, 1.0);
-    let slide = 1.0 - (1.0 - t) * (1.0 - t);
-    let mut at = sink.from.lerp(sink.to, slide);
-    at.y = sink.from.y + (sink.to.y - sink.from.y) * t * t;
-    (at, 1.0 - 0.25 * t)
+impl Sink {
+    /// A ball pocketed at `from` while moving at `velocity`, into the pocket
+    /// whose middle is `to`.
+    pub(crate) fn new(from: Vec3, velocity: Vec3, spin: Vec3, to: Vec3) -> Self {
+        let flat = Vec3::new(velocity.x, 0.0, velocity.z);
+        let reach = Vec3::new(to.x - from.x, 0.0, to.z - from.z);
+        let distance = reach.length();
+        let direction = flat
+            .try_normalize()
+            .unwrap_or_else(|| reach.normalize_or_zero());
+        let speed = flat.length().max(0.6);
+        Self {
+            from,
+            bend: from + direction * distance * 0.5,
+            to: Vec3::new(to.x, from.y, to.z),
+            roll: (distance / speed).clamp(ROLL_IN.0, ROLL_IN.1),
+            spin,
+            elapsed: 0.0,
+        }
+    }
 }
+
+/// Where a ball `t` seconds into its [`Sink`] is drawn, and its scale, or
+/// `None` once it has gone. It rolls along a curve that leaves the way it was
+/// heading and ends in the middle of the pocket, tipping over the edge, then
+/// falls ever faster out of sight under the pocket's dark drop.
+pub(crate) fn sink_pose(sink: &Sink, t: f32, r: f32) -> Option<(Vec3, f32)> {
+    const TIP: f32 = 0.35;
+    if t < sink.roll {
+        let u = t / sink.roll;
+        let at = sink
+            .from
+            .lerp(sink.bend, u)
+            .lerp(sink.bend.lerp(sink.to, u), u);
+        return Some((Vec3::new(at.x, sink.from.y - TIP * r * u * u, at.z), 1.0));
+    }
+    let u = (t - sink.roll) / DROP_TIME;
+    (u < 1.0).then(|| {
+        let fall = TIP * r + 3.2 * r * u * u;
+        (
+            Vec3::new(sink.to.x, sink.from.y - fall, sink.to.z),
+            1.0 - 0.12 * u,
+        )
+    })
+}
+
+/// Each ball's last velocity and spin on the table, for the pocket roll-in.
+#[derive(Default)]
+pub(crate) struct LastMotion(std::collections::HashMap<BallId, (Vec3, Vec3)>);
 
 pub(crate) fn sync_balls(
     time: Res<Time>,
@@ -364,6 +412,7 @@ pub(crate) fn sync_balls(
     sim: Res<Simulation>,
     motion: Res<crate::ReducedMotion>,
     mut sinking: Local<std::collections::HashMap<BallId, Sink>>,
+    mut last: Local<LastMotion>,
     mut balls: Query<(&Ball, &mut Transform, &mut Visibility)>,
 ) {
     let dt = if paused.0 { 0.0 } else { time.delta_secs() };
@@ -374,10 +423,10 @@ pub(crate) fn sync_balls(
             continue;
         };
         if s.motion == Motion::Pocketed {
-            // A ball that was on show when it dropped sinks out of sight;
+            // A ball that was on show when it dropped rolls in and sinks;
             // one already gone (after an undo, say) stays hidden.
             let shown = *visibility != Visibility::Hidden;
-            if motion.0 {
+            if motion.0 || (!shown && !sinking.contains_key(&ball.0)) {
                 *visibility = Visibility::Hidden;
                 continue;
             }
@@ -390,24 +439,30 @@ pub(crate) fn sync_balls(
                     .iter()
                     .min_by(|a, b| a.centre.distance(at).total_cmp(&b.centre.distance(at)))
                     .map_or(at, |p| p.centre);
-                Sink {
-                    from: transform.translation,
-                    to: Vec3::new(pocket.x as f32, -2.5 * r, pocket.y as f32),
-                    elapsed: if shown { 0.0 } else { SINK_TIME },
-                }
+                let (velocity, spin) = last.0.get(&ball.0).copied().unwrap_or_default();
+                Sink::new(
+                    transform.translation,
+                    velocity,
+                    spin,
+                    Vec3::new(pocket.x as f32, 0.0, pocket.y as f32),
+                )
             });
             sink.elapsed += dt;
-            if sink.elapsed >= SINK_TIME {
-                *visibility = Visibility::Hidden;
-            } else {
-                let (at, scale) = sink_pose(sink, sink.elapsed / SINK_TIME);
-                transform.translation = at;
-                transform.scale = Vec3::splat(scale);
-                *visibility = Visibility::Inherited;
+            match sink_pose(sink, sink.elapsed, r) {
+                Some((at, scale)) => {
+                    transform.translation = at;
+                    transform.scale = Vec3::splat(scale);
+                    let turn = Quat::from_scaled_axis(sink.spin * dt);
+                    transform.rotation = (turn * transform.rotation).normalize();
+                    *visibility = Visibility::Inherited;
+                }
+                None => *visibility = Visibility::Hidden,
             }
             continue;
         }
         sinking.remove(&ball.0);
+        last.0
+            .insert(ball.0, (s.velocity.as_vec3(), s.angular_velocity.as_vec3()));
         *visibility = Visibility::Inherited;
         transform.scale = Vec3::ONE;
         transform.translation = s.position.as_vec3();
@@ -430,20 +485,27 @@ mod tests {
     }
 
     #[test]
-    fn a_sinking_ball_slides_into_the_pocket_falling_ever_faster() {
-        let sink = Sink {
-            from: Vec3::new(1.0, 0.03, 0.5),
-            to: Vec3::new(1.2, -0.07, 0.6),
-            elapsed: 0.0,
-        };
-        let (start, s0) = sink_pose(&sink, 0.0);
-        let (mid, _) = sink_pose(&sink, 0.5);
-        let (end, s1) = sink_pose(&sink, 1.0);
-        assert_eq!((start, s0), (sink.from, 1.0));
-        assert!((end - sink.to).length() < 1e-6 && s1 < 1.0);
-        // Most of the slide is done by half time, most of the fall is not.
-        assert!((mid.x - start.x) / (end.x - start.x) > 0.7);
-        assert!((mid.y - start.y) / (end.y - start.y) < 0.3);
+    fn a_pocketed_ball_rolls_on_into_the_pocket_then_drops_out_of_sight() {
+        let r = 0.0286;
+        let from = Vec3::new(1.0, r, 0.5);
+        let to = Vec3::new(1.1, 0.0, 0.6);
+        // Heading along +X: it starts that way, then curves into the middle.
+        let sink = Sink::new(from, Vec3::new(1.0, 0.0, 0.0), Vec3::ZERO, to);
+        let (start, s0) = sink_pose(&sink, 0.0, r).unwrap();
+        assert!((start - from).length() < 1e-6 && (s0 - 1.0).abs() < 1e-6);
+        let (early, _) = sink_pose(&sink, sink.roll * 0.2, r).unwrap();
+        assert!(
+            early.x - from.x > (early.z - from.z) * 1.5,
+            "leaves the way it was going"
+        );
+        let (middle, _) = sink_pose(&sink, sink.roll, r).unwrap();
+        assert!((middle.x - to.x).abs() < 1e-5 && (middle.z - to.z).abs() < 1e-5);
+        // Then it falls, faster and faster, and is gone.
+        let (half, _) = sink_pose(&sink, sink.roll + DROP_TIME / 2.0, r).unwrap();
+        let (late, _) = sink_pose(&sink, sink.roll + DROP_TIME * 0.9, r).unwrap();
+        assert!(middle.y - half.y < half.y - late.y);
+        assert!(late.y < -r);
+        assert!(sink_pose(&sink, sink.roll + DROP_TIME, r).is_none());
     }
 
     #[test]

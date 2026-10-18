@@ -60,7 +60,7 @@ const KEY_AIM_SPEED: (f64, f64) = (1.0, 0.08);
 const FINE_POINTER: f64 = 0.1;
 /// When the balls stop, the stick slides in from this far back, metres,
 /// over this long, seconds.
-const STICK_ENTRY: (f32, f32) = (0.3, 0.28);
+const STICK_ENTRY: (f32, f32) = (0.12, 0.2);
 /// Guide lengths, metres: the object ball's path and the cue ball's, after
 /// contact or a cushion, for the basic and the assisted guide.
 const GUIDE_AFTER: [(f64, f64); 2] = [(0.4, 0.22), (1.2, 0.5)];
@@ -78,12 +78,12 @@ const CUE_ELEVATION: f32 = 0.07;
 /// Gap between the tip and the ball while aiming, metres.
 const CUE_REST_GAP: f32 = 0.012;
 /// How far the stick pulls back at full power, metres.
-const CUE_MAX_DRAWBACK: f32 = 0.22;
+const CUE_MAX_DRAWBACK: f32 = 0.15;
 /// Shortest and longest forward swing, seconds.
 const SWING_TIME: (f64, f64) = (0.05, 0.3);
 /// How long, and how far, the stick follows through after contact.
 const FOLLOW_TIME: f32 = 0.14;
-const FOLLOW_DISTANCE: f32 = 0.05;
+const FOLLOW_DISTANCE: f32 = 0.03;
 
 /// The shot being prepared.
 #[derive(Resource, Debug, Clone)]
