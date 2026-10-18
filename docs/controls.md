@@ -24,7 +24,9 @@ by accident.
 | Spin selector (white ball) | Drag the red dot to where the tip should strike. Arrow keys move it, `Home` or `0` centres it, double-click centres it. The dashed ring is the miscue limit. |
 | Power slider | Sets the power, like dragging back on the table. Native range input: arrows, Page Up/Down, Home/End. |
 | Shoot | Shoots with the current aim, power and spin. If the power is still at zero, it says so instead of firing. |
-| Toolbar | How to play · Undo · New rack · Sound · Settings · Full screen · Pause · (Exit, if the host provides one) |
+| Toolbar | How to play · Undo (free play) · New game · Sound · Settings · Full screen · Pause · (Exit, if the host provides one) |
+| Call (eight-ball) | Shows the call for the next shot: ball, then the pocket lit on a tiny table, marked *auto* while it follows the aim. Opens the call dialog. |
+| Spot a ball (eight-ball) | Appears only when WPA 1.6 allows it: the cue ball in hand above the head string, and every legal ball above it too. |
 
 ## Keyboard
 
@@ -37,8 +39,8 @@ With the table focused (click it, or Tab to it):
 | `Space` or `Enter` | Shoot |
 | `W` `A` `S` `D` | Move the tip (spin); `C` centres it |
 | `I` `J` `K` `L` | Move the cue ball while it is in hand |
-| `U` (or `Ctrl`/`⌘`+`Z`) | Undo the last shot or re-rack |
-| `R` | Re-rack immediately (undoable) |
+| `U` (or `Ctrl`/`⌘`+`Z`) | Undo the last shot or re-rack (free play) |
+| `R` | Re-rack immediately (free play, undoable) |
 | `Esc` | Cancel a shot being charged |
 
 Anywhere in CUE:
@@ -49,7 +51,7 @@ Anywhere in CUE:
 | `P` | Pause / resume |
 | `M` | Sound on / off |
 | `F` | Full screen |
-| `N` | New rack (asks first) |
+| `N` | New game: re-rack, start or leave a match |
 | `O` | Settings |
 | `` ` `` | Developer overlay (frame rate, state) |
 
@@ -62,6 +64,37 @@ Anywhere in CUE:
 - **Undo** puts the table back exactly as it was before the last shot or
   re-rack, even mid-shot. It restores a full snapshot of the simulation; it
   does not rewind physics (spec §8.1).
+
+## Eight-ball
+
+**New game → Eight-ball for two** sets up a match on this device: two names
+(display only, never stored), the rules (WPA or casual), the length (one
+rack, or a race to 3 or 5) and who breaks. The rules are explained in
+[rules-eight-ball.md](rules-eight-ball.md).
+
+- **The break.** The cue ball is in hand above the head string, which is drawn
+  on the cloth. You can't place it anywhere else.
+- **Calling.** With WPA rules, every shot after the break is called. CUE
+  proposes the call from your aim: the ball the cue ball would hit first, and
+  the pocket that ball heads for. If no legal ball is in line, it proposes a
+  safety. The called ball and pocket are ringed on the table. Use the **Call**
+  button to pick a ball and a pocket yourself, call a **Safety**, or go back
+  to **Follow my aim**. With casual rules only the 8 is called, the same way.
+- **Turns.** The scoreboard shows both players, their group and how many
+  balls they still need, the score in a race, and whose turn it is. Every
+  ruling is shown and announced in one sentence, such as "Foul by Ana: cue
+  ball pocketed. Bo has ball in hand."
+- **Decisions.** After some breaks the rules let a player choose: accept the
+  table, re-rack, spot the 8 and so on. A panel over the cue controls says
+  who chooses and lists exactly the options the rules allow. The table stays
+  visible behind it.
+- **End of a rack.** The same panel names the winner and why, and offers the
+  next rack. The break alternates. Once the match is decided, it offers a new
+  match or free play.
+- **Stalemate.** If both players agree that nobody can make progress, choose
+  **New game → Declare a stalemate**. The rack is replayed and the same
+  player breaks.
+- There is no undo in a match. **New game** offers a new match or free play.
 
 ## Aiming guide
 

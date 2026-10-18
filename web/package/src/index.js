@@ -4,6 +4,7 @@
 //   const game = await createCue({ container: document.querySelector('#cue') });
 //   const off = game.on('shot-end', (shot) => { ... });
 //   game.pause(); game.resume(); game.undo(); game.rerack();
+//   game.newGame({ ruleset: 'eight-ball-wpa', raceTo: 3, names: ['Ana', 'Bo'] });
 //   await game.destroy();
 //
 // The wrapper owns one root element inside the host's container (a <canvas>
@@ -36,7 +37,22 @@ const EVENTS = new Set([
   'settings-change',
   'destroyed',
   'error',
+  // Eight-ball (docs/rules-eight-ball.md).
+  'new-game',
+  'ruling',
+  'foul',
+  'groups-assigned',
+  'turn-changed',
+  'decision-required',
+  'decided',
+  'rack-over',
+  'match-over',
+  'ball-spotted',
+  'shot-refused',
+  'call-refused',
 ]);
+
+const RULESETS = new Set(['eight-ball-wpa', 'eight-ball-casual']);
 
 let live = null;
 
@@ -53,11 +69,12 @@ let live = null;
  * @param {boolean} [options.persist=true]  Remember preferences in localStorage.
  * @param {() => void} [options.onExit]  Shows an Exit button that calls this.
  * @param {string} [options.fallbackUrl]  Link offered when the browser is unsupported.
+ * @param {string} [options.rulesUrl]  Link to the eight-ball rules notes, shown in the match setup.
  * @param {string|URL} [options.moduleUrl]  wasm-bindgen module; defaults to `./pkg/cue_web.js`.
  * @returns {Promise<object>} Resolves once the first frame has run.
  */
 export async function createCue(options = {}) {
-  const { container, ui = true, persist = true, onExit, fallbackUrl } = options;
+  const { container, ui = true, persist = true, onExit, fallbackUrl, rulesUrl } = options;
   if (!(container instanceof HTMLElement)) {
     throw new TypeError('createCue: `container` must be an HTMLElement');
   }
@@ -144,6 +161,20 @@ export async function createCue(options = {}) {
     shoot: guard(() => wasm?.shoot()),
     setPower: guard((p) => wasm?.setPower(Number(p))),
     setTip: guard((x, y) => wasm?.setTip(Number(x), Number(y))),
+    newGame: guard((setup = {}) => {
+      const { ruleset = 'eight-ball-wpa', breaker = 'random', raceTo = 1, names = [] } = setup;
+      if (!RULESETS.has(ruleset)) throw new TypeError(`newGame: unknown ruleset "${ruleset}"`);
+      const name = (i) => String(names[i] ?? '').trim() || t.player(i + 1);
+      wasm?.newGame(ruleset, String(breaker), Math.round(Number(raceTo)) || 1, name(0), name(1));
+    }),
+    freePlay: guard(() => wasm?.freePlay()),
+    callBall: guard((ball, pocket) => wasm?.callBall(Number(ball), String(pocket))),
+    callSafety: guard(() => wasm?.callSafety()),
+    autoCall: guard(() => wasm?.autoCall()),
+    decide: guard((choice) => wasm?.decide(String(choice))),
+    nextRack: guard(() => wasm?.nextRack()),
+    stalemate: guard(() => wasm?.stalemate()),
+    spotRequest: guard(() => wasm?.spotRequest()),
     state: () => (wasm && !destroyed ? wasm.state() : null),
     enterFullscreen: () => fs.enter(),
     exitFullscreen: () => fs.exit(),
@@ -171,6 +202,7 @@ export async function createCue(options = {}) {
       settings: settingsStore,
       onExit,
       fallbackUrl,
+      rulesUrl,
       onTutorialDone: () => markTutorialSeen(persist),
     });
     overlay.setState('loading');
@@ -248,6 +280,30 @@ export async function createCue(options = {}) {
     shoot: api.shoot,
     setPower: api.setPower,
     setTip: api.setTip,
+    /**
+     * Starts a local eight-ball match for two players on this device.
+     * `ruleset`: 'eight-ball-wpa' (every shot called, the default) or
+     * 'eight-ball-casual' (only the 8). `breaker`: 'a', 'b' or 'random'.
+     * `raceTo`: racks needed to win, 1–15. `names` are display-only and never
+     * stored.
+     */
+    newGame: api.newGame,
+    /** Leaves any match and goes back to free play. */
+    freePlay: api.freePlay,
+    /** Eight-ball: calls `ball` into `pocket` ('foot-near', 'side-far'…). */
+    callBall: api.callBall,
+    /** Eight-ball: calls a safety for the next shot. */
+    callSafety: api.callSafety,
+    /** Eight-ball: lets the call follow the aim again. */
+    autoCall: api.autoCall,
+    /** Eight-ball: answers a pending decision with one of its option names. */
+    decide: api.decide,
+    /** Eight-ball: racks the next game once a rack is over. */
+    nextRack: api.nextRack,
+    /** Eight-ball: both players agree to a stalemate; the rack is replayed. */
+    stalemate: api.stalemate,
+    /** Eight-ball: spots the legal ball nearest the head string (WPA 1.6). */
+    spotRequest: api.spotRequest,
     setTheme: guard((theme) => settingsStore.set({ ...settings, theme })),
     setAssists: guard((assists) => settingsStore.set({ ...settings, assists })),
     setAudio: guard((audio) =>

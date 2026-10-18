@@ -11,6 +11,7 @@
 
 mod ball_texture;
 mod camera;
+mod eight;
 mod hud;
 mod scene;
 mod settings;
@@ -19,9 +20,10 @@ mod sim;
 
 use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*};
 
+pub use eight::{EightBall, GameSetup, Mode};
 pub use settings::{Assists, DevHud, GameCommand, Theme};
 pub use shot::{Aim, MIN_SHOT_POWER};
-pub use sim::{Ball, Contact, GameEvent, LastShot, Paused, ShotFinished, Simulation};
+pub use sim::{Ball, Contact, GameEvent, HandRegion, LastShot, Paused, ShotFinished, Simulation};
 
 /// Everything CUE adds to a Bevy [`App`].
 #[derive(Debug, Default)]
@@ -44,6 +46,7 @@ impl Plugin for CuePlugin {
             .init_resource::<Theme>()
             .init_resource::<Assists>()
             .init_resource::<DevHud>()
+            .init_resource::<Mode>()
             .add_message::<Contact>()
             .add_message::<ShotFinished>()
             .add_message::<GameEvent>()
@@ -56,10 +59,13 @@ impl Plugin for CuePlugin {
             .add_systems(
                 Update,
                 (
+                    eight::apply_commands,
                     shot::apply_commands,
                     shot::read_input,
+                    eight::suggest_call,
                     sim::advance,
                     sim::after_shot,
+                    eight::rule_shots,
                     sim::sync_balls,
                     shot::draw_aim,
                     camera::fit_to_window,

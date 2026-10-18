@@ -129,7 +129,7 @@ fn break_report_names_the_first_ball_hit_and_the_cushion_count() {
     );
     assert_eq!(report.shot_id, 1);
     assert_eq!(report.first_contacts(), vec![apex]);
-    let to_cushion = report.object_balls_touching_cushion().len();
+    let to_cushion = report.object_balls_driven_to_a_rail().len();
     assert!(
         to_cushion >= 4,
         "a full-power break drives {to_cushion} balls to a rail"
@@ -187,4 +187,103 @@ fn nearest_free_spot_steps_around_an_occupied_spot() {
         spot.distance(table.head_spot()) < 4.0 * R,
         "should be close"
     );
+}
+
+#[test]
+fn the_head_string_sensor_reports_each_crossing_of_the_cue_ball() {
+    use cue_core::ShotEventKind;
+    let crossings = |r: &ShotReport| {
+        r.events
+            .iter()
+            .filter(|e| e.kind == ShotEventKind::CueCrossedHeadString)
+            .count()
+    };
+    let table = TableSpec::nine_foot();
+
+    // A break: the cue ball leaves the kitchen before it reaches the rack.
+    let mut w = World::new(
+        PhysicsProfile::baseline(),
+        &eight_ball_rack(&table, 3).unwrap(),
+    )
+    .unwrap();
+    let report = play(&mut w, Strike::centre(DVec2::X, 1.0));
+    let t0 = report.first_contact_time().unwrap();
+    assert!(report.cue_crossed_head_string_before(t0));
+
+    // From just below the string, into the kitchen, off the head rail and
+    // back out: two crossings.
+    let start = DVec2::new(table.head_string_x() + 0.1, 0.0);
+    let mut w = world(&[(0, start)]);
+    let report = play(&mut w, Strike::centre(DVec2::NEG_X, 0.25));
+    let end = w.state(BallId::CUE).unwrap().position.x;
+    assert!(
+        end > table.head_string_x(),
+        "rolled back out of the kitchen"
+    );
+    assert_eq!(crossings(&report), 2, "{report:?}");
+}
+
+/// Cushion contacts in a report as `(ball, rail, frozen)`.
+fn cushions(report: &ShotReport) -> Vec<(u8, cue_core::Rail, bool)> {
+    report
+        .events
+        .iter()
+        .filter_map(|e| match e.kind {
+            cue_core::ShotEventKind::Cushion { ball, rail, frozen } => {
+                Some((ball.number(), rail, frozen))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_frozen_ball_struck_into_its_own_rail_is_reported_as_frozen() {
+    use cue_core::Rail;
+    // The 5 rests against the near rail; the cue ball hits it full into it.
+    // The 5 is pinned between the rail and the cue ball: it bounces between
+    // them without ever leaving the rail, so none of its contacts drive it to
+    // a rail (WPA 2.7).
+    let z = half().y - R - 1e-6;
+    let mut w = world(&[(0, DVec2::new(0.4, z - 0.4)), (5, DVec2::new(0.4, z))]);
+    let report = play(&mut w, Strike::centre(DVec2::Y, 0.15));
+    let contacts = cushions(&report);
+    let pinned: Vec<_> = contacts.iter().filter(|c| c.0 == 5).collect();
+    assert!(!pinned.is_empty(), "{report:?}");
+    assert!(
+        pinned.iter().all(|c| c.1 == Rail::Near && c.2),
+        "{contacts:?}"
+    );
+    assert!(
+        !report.cushion_after_first_contact(),
+        "no ball was driven to a rail"
+    );
+}
+
+#[test]
+fn a_frozen_ball_that_leaves_its_rail_and_returns_is_driven_to_it() {
+    use cue_core::Rail;
+    // The cue ball rests against the near rail and is driven into it: the
+    // first contact is a press, every later one a real rail.
+    let z = half().y - R - 1e-6;
+    let mut w = world(&[(0, DVec2::new(0.4, z))]);
+    let report = play(&mut w, Strike::centre(DVec2::Y, 0.6));
+    let contacts = cushions(&report);
+    assert_eq!(
+        contacts.first(),
+        Some(&(0, Rail::Near, true)),
+        "{contacts:?}"
+    );
+    assert!(
+        contacts.len() >= 3,
+        "it crosses the table and back: {contacts:?}"
+    );
+    assert!(contacts[1..].iter().all(|c| !c.2), "{contacts:?}");
+    assert!(contacts.contains(&(0, Rail::Far, false)));
+    assert!(contacts[1..].contains(&(0, Rail::Near, false)));
+
+    // A ball not touching any rail is never frozen.
+    let mut w = world(&[(0, DVec2::new(0.4, 0.0))]);
+    let report = play(&mut w, Strike::centre(DVec2::Y, 0.2));
+    assert!(cushions(&report).iter().all(|c| !c.2));
 }

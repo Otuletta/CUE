@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::{BallId, PocketId};
+use crate::{BallId, PocketId, Rail};
 
 /// Contacts closer together than this, in seconds, count as simultaneous.
 ///
@@ -46,6 +46,12 @@ pub enum ShotEventKind {
     Cushion {
         /// The ball.
         ball: BallId,
+        /// The rail touched; pocket jaws belong to a rail.
+        rail: Rail,
+        /// The ball was already touching this rail when the shot began and
+        /// has not left it since. WPA 2.7: a frozen ball pushed into its own
+        /// rail is not *driven* to it.
+        frozen: bool,
     },
     /// A ball dropped into a pocket.
     Pocketed {
@@ -54,6 +60,9 @@ pub enum ShotEventKind {
         /// The pocket.
         pocket: PocketId,
     },
+    /// The cue ball's centre crossed the head string, in either direction.
+    /// Needed for WPA 3.11 (bad play from above the head string).
+    CueCrossedHeadString,
 }
 
 impl ShotReport {
@@ -98,28 +107,48 @@ impl ShotReport {
         self.pocketed().any(|(b, _)| b.is_cue())
     }
 
-    /// Whether any ball touched a cushion strictly after the cue ball's first
-    /// contact with an object ball. Needed for the "no rail after contact"
-    /// foul.
+    /// Whether any ball was driven to a rail (WPA 2.7) strictly after the cue
+    /// ball's first contact with an object ball.
     pub fn cushion_after_first_contact(&self) -> bool {
         let Some(t0) = self.first_contact_time() else {
             return false;
         };
         self.events
             .iter()
-            .any(|e| e.time > t0 && matches!(e.kind, ShotEventKind::Cushion { .. }))
+            .any(|e| e.time > t0 && e.kind.drives_to_a_rail())
     }
 
-    /// Distinct object balls that touched a cushion at any time. Needed for
-    /// the legal-break count.
-    pub fn object_balls_touching_cushion(&self) -> BTreeSet<BallId> {
+    /// Whether the cue ball crossed the head string strictly before time `t`.
+    pub fn cue_crossed_head_string_before(&self, t: f64) -> bool {
+        self.events
+            .iter()
+            .any(|e| e.time < t && e.kind == ShotEventKind::CueCrossedHeadString)
+    }
+
+    /// Distinct object balls driven to a rail (WPA 2.7) at any time: the
+    /// legal-break count of WPA 4.3 (d). Pocketed balls are not included;
+    /// the rules count them separately.
+    pub fn object_balls_driven_to_a_rail(&self) -> BTreeSet<BallId> {
         self.events
             .iter()
             .filter_map(|e| match e.kind {
-                ShotEventKind::Cushion { ball } if !ball.is_cue() => Some(ball),
+                ShotEventKind::Cushion { ball, .. }
+                    if !ball.is_cue() && e.kind.drives_to_a_rail() =>
+                {
+                    Some(ball)
+                }
                 _ => None,
             })
             .collect()
+    }
+}
+
+impl ShotEventKind {
+    /// Whether this is a cushion contact that drives the ball to a rail in
+    /// the sense of WPA 2.7: any contact except a frozen ball's with the
+    /// rail it has not left.
+    pub fn drives_to_a_rail(&self) -> bool {
+        matches!(self, Self::Cushion { frozen: false, .. })
     }
 }
 
@@ -143,7 +172,19 @@ mod tests {
     }
 
     fn cushion(n: u8) -> ShotEventKind {
-        ShotEventKind::Cushion { ball: ball(n) }
+        ShotEventKind::Cushion {
+            ball: ball(n),
+            rail: Rail::Foot,
+            frozen: false,
+        }
+    }
+
+    fn frozen(n: u8) -> ShotEventKind {
+        ShotEventKind::Cushion {
+            ball: ball(n),
+            rail: Rail::Near,
+            frozen: true,
+        }
     }
 
     #[test]
@@ -196,6 +237,25 @@ mod tests {
     }
 
     #[test]
+    fn a_frozen_ball_pushed_into_its_own_rail_is_not_driven_to_a_rail() {
+        let pressed = ShotReport {
+            shot_id: 1,
+            events: vec![at(0.2, contact(0, 5)), at(0.2, frozen(5))],
+        };
+        assert!(!pressed.cushion_after_first_contact());
+        assert!(pressed.object_balls_driven_to_a_rail().is_empty());
+        let returned = ShotReport {
+            shot_id: 1,
+            events: vec![
+                at(0.2, contact(0, 5)),
+                at(0.2, frozen(5)),
+                at(0.9, cushion(5)),
+            ],
+        };
+        assert!(returned.cushion_after_first_contact());
+    }
+
+    #[test]
     fn counts_distinct_object_balls_on_cushions_and_pocketings() {
         let r = ShotReport {
             shot_id: 1,
@@ -215,7 +275,7 @@ mod tests {
             ],
         };
         assert_eq!(
-            r.object_balls_touching_cushion()
+            r.object_balls_driven_to_a_rail()
                 .into_iter()
                 .collect::<Vec<_>>(),
             vec![ball(4), ball(12)]

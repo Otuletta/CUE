@@ -12,8 +12,8 @@
 //!   system applies at the start of the next frame, so the host never touches
 //!   ECS state directly. Game events go to a single JS listener.
 //! - **State is published, not queried.** Once per frame the engine writes a
-//!   small snapshot (aim, power, ball in hand…) that the host's controls read
-//!   cheaply without reaching into the ECS.
+//!   small snapshot (aim, power, ball in hand, the eight-ball match…) that the
+//!   host's controls read cheaply without reaching into the ECS.
 //! - **Pausing stops rendering.** A paused instance switches winit to
 //!   reactive mode and sleeps until the host resumes it, so a backgrounded or
 //!   hidden game costs no CPU or GPU.
@@ -22,6 +22,7 @@
 //! and the audio engine live in thread-locals.
 
 mod audio;
+mod eight;
 
 use std::{
     cell::RefCell,
@@ -38,14 +39,23 @@ use bevy::{
     prelude::*,
     winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent},
 };
-use cue_core::{ShotReport, glam::DVec2};
+use cue_core::{
+    BallId, PocketId, ShotReport,
+    glam::DVec2,
+    rules::{
+        Ruleset, Seat,
+        eight_ball::{Call, Choice},
+    },
+};
 use cue_game::{
-    Aim, Assists, Contact, CuePlugin, GameCommand, GameEvent, LastShot, MIN_SHOT_POWER, Paused,
-    ShotFinished, Simulation, Theme,
+    Aim, Assists, Contact, CuePlugin, GameCommand, GameEvent, GameSetup, HandRegion, LastShot,
+    MIN_SHOT_POWER, Mode, Paused, ShotFinished, Simulation, Theme,
 };
 use wasm_bindgen::prelude::*;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+use crate::eight::MatchSnapshot;
+
+#[derive(Debug, Clone, PartialEq)]
 enum Command {
     Pause,
     Resume,
@@ -69,12 +79,14 @@ struct Snapshot {
     tip: DVec2,
     at_rest: bool,
     in_hand: bool,
+    hand_region: Option<HandRegion>,
     can_undo: bool,
     paused: bool,
     theme: &'static str,
     assists: &'static str,
     shots: u32,
     balls_in_play: Vec<u8>,
+    eight_ball: Option<MatchSnapshot>,
 }
 
 static LIFECYCLE: Mutex<Lifecycle> = Mutex::new(Lifecycle::Idle);
@@ -173,7 +185,9 @@ pub fn mount(canvas_selector: &str) -> Result<(), JsError> {
         .insert_resource(WinitSettings::game())
         .add_systems(Startup, install_waker)
         .add_systems(First, apply_commands)
-        .add_systems(Last, (emit_events, publish_state))
+        // Published first, so a listener that reads `state()` while handling
+        // an event sees the state that event left behind.
+        .add_systems(Last, (publish_state, emit_events).chain())
         .run();
     Ok(())
 }
@@ -190,16 +204,102 @@ pub fn resume() -> Result<(), JsError> {
     send(Command::Resume)
 }
 
-/// Racks the balls again. Undoable.
+/// Racks the balls again. Undoable. Free play only.
 #[wasm_bindgen]
 pub fn rerack() -> Result<(), JsError> {
     game(GameCommand::Rerack)
 }
 
-/// Undoes the last shot or re-rack.
+/// Undoes the last shot or re-rack. Free play only.
 #[wasm_bindgen]
 pub fn undo() -> Result<(), JsError> {
     game(GameCommand::Undo)
+}
+
+/// Starts a match of eight-ball for two players on this device.
+///
+/// `ruleset` is `eight-ball-wpa` (every shot called) or `eight-ball-casual`
+/// (only the eight's pocket); `breaker` is `a`, `b` or `random`; `race_to` is
+/// the racks needed to win, clamped to `1..=15`. Names are display-only,
+/// trimmed to 24 characters and never stored. Emits `new-game`.
+#[wasm_bindgen(js_name = newGame)]
+pub fn new_game(
+    ruleset: &str,
+    breaker: &str,
+    race_to: u32,
+    name_a: &str,
+    name_b: &str,
+) -> Result<(), JsError> {
+    let ruleset = Ruleset::parse(ruleset).ok_or_else(|| JsError::new("UNKNOWN_RULESET"))?;
+    let breaker = match breaker {
+        "random" => None,
+        seat => Some(Seat::parse(seat).ok_or_else(|| JsError::new("UNKNOWN_SEAT"))?),
+    };
+    game(GameCommand::NewGame(GameSetup {
+        ruleset,
+        breaker,
+        race_to: u8::try_from(race_to.clamp(1, 15)).unwrap_or(1),
+        names: [name_a.to_owned(), name_b.to_owned()],
+    }))
+}
+
+/// Leaves any match and goes back to free play on a fresh rack. Emits
+/// `new-game`.
+#[wasm_bindgen(js_name = freePlay)]
+pub fn free_play() -> Result<(), JsError> {
+    game(GameCommand::FreePlay)
+}
+
+/// Eight-ball: calls `ball` into `pocket` (a pocket name such as
+/// `foot-near`) for the next shot, overriding the call that follows the aim.
+/// An invalid call emits `call-refused`.
+#[wasm_bindgen(js_name = callBall)]
+pub fn call_ball(ball: u8, pocket: &str) -> Result<(), JsError> {
+    let ball = BallId::new(ball).map_err(|_| JsError::new("UNKNOWN_BALL"))?;
+    let pocket = PocketId::parse(pocket).ok_or_else(|| JsError::new("UNKNOWN_POCKET"))?;
+    game(GameCommand::SetCall(Call::Ball { ball, pocket }))
+}
+
+/// Eight-ball: calls a safety for the next shot: play passes whatever drops.
+#[wasm_bindgen(js_name = callSafety)]
+pub fn call_safety() -> Result<(), JsError> {
+    game(GameCommand::SetCall(Call::Safety))
+}
+
+/// Eight-ball: lets the call follow the aim again.
+#[wasm_bindgen(js_name = autoCall)]
+pub fn auto_call() -> Result<(), JsError> {
+    game(GameCommand::AutoCall)
+}
+
+/// Eight-ball: answers a pending decision with one of the option names in
+/// `state().eightBall.decision.options`.
+#[wasm_bindgen]
+pub fn decide(choice: &str) -> Result<(), JsError> {
+    let choice = Choice::parse(choice).ok_or_else(|| JsError::new("UNKNOWN_CHOICE"))?;
+    game(GameCommand::Decide(choice))
+}
+
+/// Eight-ball: racks the next game of the match once a rack is over. The
+/// break alternates.
+#[wasm_bindgen(js_name = nextRack)]
+pub fn next_rack() -> Result<(), JsError> {
+    game(GameCommand::NextRack)
+}
+
+/// Eight-ball: both players agree the rack is a stalemate (WPA 4.11). The
+/// rack is replayed and the same player breaks.
+#[wasm_bindgen]
+pub fn stalemate() -> Result<(), JsError> {
+    game(GameCommand::Stalemate)
+}
+
+/// Eight-ball: with the cue ball in hand above the head string and every
+/// legal ball above it too, spots the one nearest the string (WPA 1.6).
+/// Available when `state().eightBall.canSpot` is true.
+#[wasm_bindgen(js_name = spotRequest)]
+pub fn spot_request() -> Result<(), JsError> {
+    game(GameCommand::SpotRequest)
 }
 
 /// Sets the charged power, `0..=1`, as a slider would.
@@ -271,20 +371,35 @@ pub fn frame_count() -> u32 {
 }
 
 /// The engine's state as of its last frame, as a plain object:
-/// `{ power, tipX, tipY, atRest, inHand, canUndo, paused, theme, assists,
-/// shots, ballsInPlay, minPower }`. `null` before the first frame.
+/// `{ mode, power, tipX, tipY, atRest, inHand, handRegion, canUndo, paused,
+/// theme, assists, shots, ballsInPlay, minPower, eightBall }`. `mode` is
+/// `free-play` or `eight-ball`; `eightBall` is the match (players, score,
+/// shooter, stage, call, decision…) or `null`. `null` before the first frame.
 #[wasm_bindgen]
 pub fn state() -> JsValue {
     let Some(s) = lock(&SNAPSHOT).clone() else {
         return JsValue::NULL;
     };
     let balls: js_sys::Array = s.balls_in_play.iter().map(|n| JsValue::from(*n)).collect();
+    let region = s.hand_region.map_or(JsValue::NULL, |r| {
+        JsValue::from_str(match r {
+            HandRegion::Anywhere => "anywhere",
+            HandRegion::AboveHeadString => "above-head-string",
+        })
+    });
+    let mode = if s.eight_ball.is_some() {
+        "eight-ball"
+    } else {
+        "free-play"
+    };
     object(&[
+        ("mode", mode.into()),
         ("power", s.power.into()),
         ("tipX", s.tip.x.into()),
         ("tipY", s.tip.y.into()),
         ("atRest", s.at_rest.into()),
         ("inHand", s.in_hand.into()),
+        ("handRegion", region),
         ("canUndo", s.can_undo.into()),
         ("paused", s.paused.into()),
         ("theme", s.theme.into()),
@@ -292,6 +407,12 @@ pub fn state() -> JsValue {
         ("shots", s.shots.into()),
         ("ballsInPlay", balls.into()),
         ("minPower", MIN_SHOT_POWER.into()),
+        (
+            "eightBall",
+            s.eight_ball
+                .as_ref()
+                .map_or(JsValue::NULL, MatchSnapshot::to_js),
+        ),
     ])
 }
 
@@ -360,7 +481,7 @@ fn apply_commands(
 }
 
 /// Builds a plain JS object from `(key, value)` pairs.
-fn object(entries: &[(&str, JsValue)]) -> JsValue {
+pub(crate) fn object(entries: &[(&str, JsValue)]) -> JsValue {
     let o = js_sys::Object::new();
     for (key, value) in entries {
         // Setting a property on a fresh plain object cannot fail.
@@ -392,7 +513,7 @@ fn shot_summary(report: &ShotReport) -> JsValue {
         ("cueBallPocketed", JsValue::from(report.cue_ball_pocketed())),
         (
             "objectBallsToCushion",
-            JsValue::from(report.object_balls_touching_cushion().len() as u32),
+            JsValue::from(report.object_balls_driven_to_a_rail().len() as u32),
         ),
     ])
 }
@@ -404,6 +525,7 @@ fn shot_summary(report: &ShotReport) -> JsValue {
 /// by an undo or re-rack still ends, with `{ abandoned: true }`.
 fn emit_events(
     sim: Res<Simulation>,
+    mode: Res<Mode>,
     mut contacts: MessageReader<Contact>,
     mut finished: MessageReader<ShotFinished>,
     mut game_events: MessageReader<GameEvent>,
@@ -444,12 +566,43 @@ fn emit_events(
         emit("shot-end", &object(&[("abandoned", JsValue::TRUE)]));
         *in_shot = false;
     }
+    let reason = |why: &str| object(&[("reason", JsValue::from_str(why))]);
     for event in game_events.read() {
         match event {
             GameEvent::Racked { cleared } => {
                 emit("racked", &object(&[("cleared", JsValue::from(*cleared))]));
             }
             GameEvent::Undone => emit("undo", &JsValue::UNDEFINED),
+            GameEvent::NewGame => {
+                let name = if mode.eight_ball().is_some() {
+                    "eight-ball"
+                } else {
+                    "free-play"
+                };
+                emit("new-game", &object(&[("mode", JsValue::from_str(name))]));
+            }
+            GameEvent::Ruled => {
+                if let Some(session) = mode.eight_ball()
+                    && let Some(ruling) = &session.last
+                {
+                    for (name, detail) in eight::ruling_events(session, ruling, session.last_call) {
+                        emit(name, &detail);
+                    }
+                }
+            }
+            GameEvent::Decided { choice } => {
+                if let Some(session) = mode.eight_ball() {
+                    emit("decided", &eight::decided(session, *choice));
+                }
+            }
+            GameEvent::Spotted { ball } => {
+                emit(
+                    "ball-spotted",
+                    &object(&[("ballId", JsValue::from(ball.number()))]),
+                );
+            }
+            GameEvent::ShotRefused(why) => emit("shot-refused", &reason(why)),
+            GameEvent::CallRefused(why) => emit("call-refused", &reason(why)),
         }
     }
 }
@@ -457,6 +610,7 @@ fn emit_events(
 fn publish_state(
     sim: Res<Simulation>,
     aim: Res<Aim>,
+    mode: Res<Mode>,
     paused: Res<Paused>,
     theme: Res<Theme>,
     assists: Res<Assists>,
@@ -467,12 +621,16 @@ fn publish_state(
         tip: aim.tip,
         at_rest: sim.world.is_at_rest(),
         in_hand: sim.in_hand(),
+        hand_region: sim.hand_region(),
         can_undo: sim.can_undo(),
         paused: paused.0,
         theme: theme.name(),
         assists: assists.name(),
         shots: last.0.as_ref().map_or(0, |r| r.shot_id),
         balls_in_play: sim.world.balls_in_play().map(|b| b.number()).collect(),
+        eight_ball: mode
+            .eight_ball()
+            .map(|session| MatchSnapshot::new(session, &sim)),
     };
     let mut slot = lock(&SNAPSHOT);
     if slot.as_ref() != Some(&snapshot) {

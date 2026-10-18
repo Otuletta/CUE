@@ -172,12 +172,30 @@ ball about 2.3°.
 
 When every ball has stopped, the world produces an immutable `ShotReport`
 (`cue-core`): a chronological list of ball contacts, cushion contacts and
-pocketings, with times relative to the strike. The rules (Phase 4) read only
-this. They can ask for the first ball contacted (all of them, when contacts
-are simultaneous within 1 ns), the balls pocketed and where, whether the cue
-ball scratched, whether any ball reached a cushion after first contact, and
-how many distinct object balls touched a cushion. That count is what the
-legal break needs.
+pocketings, with times relative to the strike. The rules read only this
+([eight-ball rules](rules-eight-ball.md)). They can ask:
+
+- which ball was contacted first (all of them, when contacts are
+  simultaneous within 1 ns);
+- which balls were pocketed, and where;
+- whether the cue ball scratched;
+- whether any ball was driven to a rail after the first contact;
+- how many distinct object balls were driven to a rail, which is what the
+  legal break needs.
+
+Two facts in the report exist only for the rules:
+
+- **Head-string crossings.** A sensor event fires each time the cue ball's
+  centre crosses the head string. It is found by the same root finding as a
+  contact, so it is exact and does not change the motion. WPA 3.11 needs it.
+- **Frozen balls.** Each cushion contact carries its rail and a `frozen`
+  flag. When the shot starts, the world records which rails each ball is
+  touching, to within 10 µm. A ball stays frozen to a rail until its centre
+  gets more than 10 µm farther from that rail's nose line. Between events the
+  distance is a quadratic in time, so the check is an exact maximum, with no
+  sampling. A contact by a ball that has not left its rail is reported as
+  frozen, and the rules do not count it as driving the ball to a rail
+  (WPA 2.7). Pocket facings and jaws belong to the rail they are cut into.
 
 ## Parameters
 

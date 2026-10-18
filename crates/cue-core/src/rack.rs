@@ -63,12 +63,14 @@ const EIGHT_SLOT: (usize, usize) = (2, 1);
 /// Back corners of the triangle; they must hold one solid and one stripe.
 const CORNER_SLOTS: [(usize, usize); 2] = [(4, 0), (4, 4)];
 
-/// A standard eight-ball rack plus the cue ball on the head spot.
+/// A standard eight-ball rack plus the cue ball ready to break.
 ///
 /// The apex sits on the foot spot and the triangle opens towards the foot
-/// rail. The eight ball is centred in the third row and the two back corners
-/// hold one ball from each group. All remaining placements are drawn from
-/// `seed`, so the same seed always yields the same rack.
+/// rail. The eight ball is centred in the third row, directly below the apex
+/// (WPA 4.2), and the two back corners hold one ball from each group. All
+/// remaining placements are drawn from `seed`, so the same seed always yields
+/// the same rack. The cue ball starts on [`TableSpec::break_spot`], above the
+/// head string.
 pub fn eight_ball_rack(table: &TableSpec, seed: u64) -> Result<Layout, CoreError> {
     table.validate()?;
 
@@ -113,7 +115,7 @@ pub fn eight_ball_rack(table: &TableSpec, seed: u64) -> Result<Layout, CoreError
     let mut rest = rest.into_iter();
 
     let mut layout = Layout::default();
-    layout.insert(BallId::CUE, table.head_spot());
+    layout.insert(BallId::CUE, table.break_spot());
     for row in 0..5 {
         for i in 0..=row {
             let slot = (row, i);
@@ -156,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn apex_is_on_the_foot_spot_and_cue_on_the_head_spot() {
+    fn apex_is_on_the_foot_spot_and_the_cue_ball_above_the_head_string() {
         let (table, layout) = rack(1);
         let apex = layout
             .iter()
@@ -165,7 +167,13 @@ mod tests {
             .unwrap();
         assert_relative_eq!(apex.1.x, table.foot_spot().x);
         assert_relative_eq!(apex.1.y, 0.0);
-        assert_eq!(layout.get(BallId::CUE), Some(table.head_spot()));
+        let cue = layout.get(BallId::CUE).unwrap();
+        assert_eq!(cue, table.break_spot());
+        assert!(table.above_head_string(cue), "WPA 4.3 (a)");
+        assert!(
+            !table.above_head_string(table.head_spot()),
+            "the string itself is not above it"
+        );
     }
 
     #[test]

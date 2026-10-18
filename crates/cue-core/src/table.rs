@@ -163,14 +163,31 @@ impl TableSpec {
         DVec2::new(self.playfield_length / 4.0, 0.0)
     }
 
-    /// The head spot, the default cue-ball position for the break.
+    /// The head spot, where the head string meets the long string.
     pub fn head_spot(&self) -> DVec2 {
         DVec2::new(self.head_string_x(), 0.0)
     }
 
-    /// `X` coordinate of the head string. The break is taken from behind it.
+    /// Default cue-ball position for a break: on the long string, two ball
+    /// diameters above the head string.
+    ///
+    /// Not the head spot itself: the cue ball must start *above* the head
+    /// string, and the string is not part of that area (WPA 2.1, 4.3 a).
+    pub fn break_spot(&self) -> DVec2 {
+        DVec2::new(self.head_string_x() - 2.0 * self.ball.diameter(), 0.0)
+    }
+
+    /// `X` coordinate of the head string. The break is taken from above
+    /// (behind) it, that is from `x < head_string_x()`.
     pub fn head_string_x(&self) -> f64 {
         -self.playfield_length / 4.0
+    }
+
+    /// Whether a ball centred at `p` is above the head string, the area the
+    /// cue ball is restricted to for the break (WPA 2.1). A ball on the
+    /// string is not above it.
+    pub fn above_head_string(&self, p: DVec2) -> bool {
+        p.x < self.head_string_x()
     }
 
     /// Whether a ball centred at `p` lies fully on the playing surface,
