@@ -37,7 +37,7 @@ left open, under its own IDs. This is where each one is answered:
 | ADR-012 | Web graphics backend | [0003](0003-wasm-and-webgl2.md) | One WebGL 2 build |
 | ADR-013 | Local persistence | [0013](0013-camera-entry-persistence-languages.md) | Preferences only |
 | ADR-014 | Challenge URLs | — | **Open**: Phase 7, after 1.0 |
-| ADR-015 | Distribution namespace | [0012](0012-distribution-and-integration.md) | `@tuletta/cue`, **provisional** until published |
+| ADR-015 | Distribution namespace | [0012](0012-distribution-and-integration.md) | `@tuletta/cue`: the npm organization `tuletta` is reserved |
 | ADR-016 | Asset licence | [0011](0011-visual-direction-and-graphics-quality.md) | No third-party assets: all procedural, under the code's licence |
 | ADR-017 | First eight-ball | [0010](0010-eight-ball-rules-and-call-shot.md) | Full WPA rules, plus a casual profile |
 | ADR-018 | Several instances per page | [0006](0006-web-lifecycle.md) | Not in v1: one instance per page |

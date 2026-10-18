@@ -1,6 +1,6 @@
 # API reference
 
-The package is `@tuletta/cue`, a provisional name (spec §17.2). It has one
+The package is `@tuletta/cue`, under the npm organization `tuletta`. It has one
 entry point, `createCue`, and the types in
 [`index.d.ts`](../web/package/src/index.d.ts) mirror this page. For hosting,
 frameworks and the page lifecycle, see [web-integration.md](web-integration.md).
@@ -147,7 +147,7 @@ top of the screen and the foot is on the right.
 | `showHelp()` | Opens the how-to-play dialog (built-in UI). |
 | `on(name, handler): () => void` | Subscribes to an event. Returns a function that unsubscribes. Unknown names throw. |
 | `stats()` | `{ frames }`, the frames run since mounting. |
-| `version` | The build version, for example `1.0.0-beta.2`. |
+| `version` | The build version, for example `1.0.0-beta.3`. |
 
 ## Events
 

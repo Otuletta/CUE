@@ -7,6 +7,10 @@ Resolves spec §31 ADR-015 (the distribution namespace), with the name still
 provisional, and settles how Phase 6 delivers a library that someone outside
 the project can integrate.
 
+> **Amended (2026-10-18): the name is confirmed.** The owner reserved the
+> scope as the npm organization `tuletta`, with two-factor authentication
+> enforced for its members, so the package is `@tuletta/cue`.
+
 ## Context
 
 The exit criterion for Phase 6 is that someone outside the project can

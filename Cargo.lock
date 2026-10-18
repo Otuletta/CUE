@@ -2320,11 +2320,11 @@ dependencies = [
 
 [[package]]
 name = "cue-audio"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 
 [[package]]
 name = "cue-core"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 dependencies = [
  "approx",
  "glam",
@@ -2334,7 +2334,7 @@ dependencies = [
 
 [[package]]
 name = "cue-game"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 dependencies = [
  "bevy",
  "cue-core",
@@ -2343,7 +2343,7 @@ dependencies = [
 
 [[package]]
 name = "cue-physics"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 dependencies = [
  "approx",
  "cue-core",
@@ -2353,7 +2353,7 @@ dependencies = [
 
 [[package]]
 name = "cue-web"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 dependencies = [
  "bevy",
  "cue-audio",

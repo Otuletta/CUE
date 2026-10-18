@@ -7,7 +7,18 @@ All notable changes to CUE. The format follows
 A change that alters shot outcomes is called out on its own line and bumps
 the physics profile id, even when no signature changes.
 
-## [Unreleased]
+## [1.0.0-beta.3] - 2026-10-18
+
+The gameplay pass:
+- breaks that open the rack;
+- a lamp-lit table with wood and real pockets;
+- fine aiming, and a side power bar you pull to shoot;
+- animations, banners and a celebration;
+- accessibility checks and a full match in the browser tests.
+
+The npm name is confirmed: the organization `tuletta` is reserved, so the
+package stays `@tuletta/cue`. This beta changes shot outcomes (physics
+profile `baseline-2`).
 
 ### Changed: shot outcomes (physics profile `baseline-2`)
 
