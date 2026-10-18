@@ -22,6 +22,20 @@ the physics profile id, even when no signature changes.
 
 ### Added
 
+- **Fine aiming:**
+  - with the mouse, hold `Shift` and the aim turns a tenth as much as the
+    pointer moves;
+  - on any device, a ridged fine-aim strip in the dock that you drag
+    sideways, or turn with the arrow keys;
+  - `turnAim(radians)` for hosts' own controls, and `aimAngle` in the
+    state.
+
+  The aim now follows the mouse only when it moves, so a fine adjustment
+  stays put.
+- **Haptics:** a short pulse on the strike and on each pocketed ball, on
+  touch devices that can vibrate, while sound is on.
+- **Dialogs keep their way out in view:** on a small stage a long card
+  scrolls under its buttons instead of hiding them.
 - **Accessibility checks in the browser tests:**
   - an axe audit of every dialog and state, in English and Spanish;
   - focus trapping in dialogs, `Esc` and focus return;

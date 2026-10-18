@@ -331,6 +331,17 @@ async function mount(options, claim) {
     overlay?.showMessage('stopped');
     emit('error', describeError(new Error(code)));
   };
+  // Fine aiming: Shift held while the mouse moves. Pointer events carry the
+  // modifier even when the canvas lacks keyboard focus, which the engine's
+  // own key input needs.
+  let fineAim = false;
+  const onPointerMove = (e) => {
+    if (e.shiftKey === fineAim || !wasm || destroyed || failed) return;
+    fineAim = e.shiftKey;
+    wasm.setFineAim(fineAim);
+  };
+  canvas.addEventListener('pointermove', onPointerMove, { passive: true });
+
   // The browser can drop the WebGL context (a GPU reset, too many tabs). The
   // renderer cannot rebuild its resources, so this ends the instance.
   const onContextLost = () => stop('CONTEXT_LOST');
@@ -344,6 +355,7 @@ async function mount(options, claim) {
     shoot: guard(() => wasm?.shoot()),
     setPower: guard((p) => wasm?.setPower(Number(p))),
     setTip: guard((x, y) => wasm?.setTip(Number(x), Number(y))),
+    turnAim: guard((radians) => wasm?.turnAim(Number(radians) || 0)),
     newGame: guard((setup = {}) => {
       checkMatch(setup);
       const { ruleset = 'eight-ball-wpa', breaker = 'random', raceTo = 1, names = [] } = setup;
@@ -397,6 +409,7 @@ async function mount(options, claim) {
 
   // Removes everything CUE added: shared by `destroy` and a cancelled load.
   const release = () => {
+    canvas.removeEventListener('pointermove', onPointerMove);
     ratioQuery?.removeEventListener('change', applyResolution);
     canvas.removeEventListener('webglcontextlost', onContextLost);
     motionQuery?.removeEventListener?.('change', applyMotion);
@@ -550,6 +563,11 @@ async function mount(options, claim) {
     shoot: api.shoot,
     setPower: api.setPower,
     setTip: api.setTip,
+    /**
+     * Turns the aim by `radians`, counter-clockwise seen from above: fine
+     * aiming for the host's own controls. Ignored while balls move.
+     */
+    turnAim: api.turnAim,
     /**
      * Starts a local eight-ball match for two players on this device.
      * `ruleset`: 'eight-ball-wpa' (every shot called, the default) or

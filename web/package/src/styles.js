@@ -153,6 +153,33 @@ a:focus-visible,
   .spin { --size: 56px; }
 }
 
+/* Fine aim: a ridged strip dragged sideways, like a jog wheel. */
+.jog {
+  position: relative;
+  flex: none;
+  width: clamp(64px, 14vw, 120px);
+  height: var(--tap);
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--glass);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  touch-action: none;
+  cursor: ew-resize;
+}
+
+.jog .ridges {
+  position: absolute;
+  inset: 8px -24px;
+  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.28) 0 2px, transparent 2px 8px);
+  transform: translateX(var(--shift, 0px));
+  pointer-events: none;
+  /* Fades out at both ends, as a wheel curving away. */
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 30%, #000 70%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 30%, #000 70%, transparent);
+}
+
 .spin::before {
   /* The miscue limit: the tip may go anywhere inside this ring. */
   content: '';
@@ -260,19 +287,33 @@ input[type='range'] {
 .sheet.bare { background: transparent; pointer-events: none; }
 
 .card {
+  --pad-y: 20px;
+  --pad-x: 22px;
+  --card: #15171c;
   width: min(100%, 440px);
   max-height: calc(100% - 16px);
   overflow: auto;
-  padding: 20px 22px;
+  padding: var(--pad-y) var(--pad-x);
   border-radius: 16px;
-  background: #15171c;
+  background: var(--card);
   border: 1px solid var(--line);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   user-select: text;
   -webkit-user-select: text;
 }
 
-.ui[data-theme='contrast'] .card { background: #000; }
+.ui[data-theme='contrast'] .card { --card: #000; }
+
+/* A card's way out stays in view while a long card scrolls on a small
+   stage. */
+.card > .actions {
+  position: sticky;
+  bottom: calc(-1 * var(--pad-y));
+  margin: 18px calc(-1 * var(--pad-x)) calc(-1 * var(--pad-y));
+  padding: 12px var(--pad-x) var(--pad-y);
+  background: var(--card);
+  border-top: 1px solid var(--line);
+}
 
 .card h2 {
   margin: 0 0 12px;
@@ -842,7 +883,7 @@ input[type='text']::placeholder { color: rgba(255, 255, 255, 0.35); }
 /* Short stages (an embedded 16:9 box on a laptop, a phone in landscape). */
 
 @container (max-height: 520px) {
-  .card { padding: 14px 18px; font-size: 13px; }
+  .card { --pad-y: 14px; --pad-x: 18px; font-size: 13px; }
   .panel { padding: 10px 14px; }
   .panel p { margin-bottom: 6px; }
   .options { grid-auto-flow: column; grid-auto-columns: 1fr; }

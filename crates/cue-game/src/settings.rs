@@ -154,6 +154,13 @@ pub enum GameCommand {
     SetPower(f64),
     /// Shoot with the current aim, power and tip.
     Shoot,
+    /// Turn the aim by this many radians, counter-clockwise seen from
+    /// above: fine aiming from the host's controls.
+    TurnAim(f64),
+    /// Whether `Shift` is held during pointer moves, as the page sees it.
+    /// The engine sees keys only while the canvas has focus; the page sees
+    /// the modifier on every pointer event.
+    SetFineAim(bool),
     /// Set the tip offset in ball radii; clamped to the miscue limit.
     SetTip(DVec2),
     /// Undo the last shot or re-rack (free play only).

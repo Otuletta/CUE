@@ -43,6 +43,9 @@ pub const MIN_SHOT_POWER: f64 = 0.03;
 const POWER_EXPONENT: f64 = 2.0;
 /// Keyboard aim speed, radians per second (and with `Shift` held).
 const KEY_AIM_SPEED: (f64, f64) = (1.0, 0.08);
+/// With `Shift` held, the mouse turns the aim by this fraction of how far it
+/// moves round the cue ball: fine aiming.
+const FINE_POINTER: f64 = 0.1;
 /// Keyboard power change per second.
 const KEY_POWER_SPEED: f64 = 0.6;
 /// Keyboard tip movement per second, in ball radii.
@@ -74,6 +77,12 @@ pub struct Aim {
     /// Tip offset in ball radii (`x` side, `y` follow/draw).
     pub tip: DVec2,
     gesture: Option<Gesture>,
+    /// The mouse's last screen position, the table point under it and the
+    /// cue ball's position then. The aim follows the mouse only when one of
+    /// them changes, so a fine adjustment holds until the player moves again.
+    hover: Option<(Vec2, DVec2, DVec2)>,
+    /// `Shift` is held on the pointer, as the page reports it.
+    fine_pointer: bool,
 }
 
 impl Default for Aim {
@@ -83,6 +92,8 @@ impl Default for Aim {
             power: 0.0,
             tip: DVec2::ZERO,
             gesture: None,
+            hover: None,
+            fine_pointer: false,
         }
     }
 }
@@ -366,6 +377,7 @@ pub(crate) fn apply_commands(
             GameCommand::SetTip(t) if t.is_finite() => {
                 aim.tip = t.clamp_length_max(MAX_TIP_OFFSET);
             }
+            GameCommand::SetFineAim(on) => aim.fine_pointer = *on,
             // A new game or rack (set up by `eight::apply_commands`, paused or
             // not) starts with a fresh aim.
             GameCommand::NewGame(_) | GameCommand::FreePlay | GameCommand::NextRack => {
@@ -380,6 +392,9 @@ pub(crate) fn apply_commands(
             _ if paused.0 || stroke.swinging() => {}
             GameCommand::SetPower(p) if p.is_finite() && sim.world.is_at_rest() => {
                 aim.power = p.clamp(0.0, 1.0);
+            }
+            GameCommand::TurnAim(a) if a.is_finite() && sim.world.is_at_rest() => {
+                aim.direction = DVec2::from_angle(*a).rotate(aim.direction).normalize();
             }
             GameCommand::Shoot if sim.world.is_at_rest() => {
                 fire(
@@ -485,10 +500,27 @@ pub(crate) fn read_input(
                 }
             }
         } else if touches.iter().next().is_none()
-            && let Some(p) = window.cursor_position().and_then(to_table)
+            && let Some(screen) = window.cursor_position()
+            && let Some(p) = to_table(screen)
         {
-            // Hover aims (mouse only; touch has no hover).
-            aim_at(&mut aim, p);
+            // Hover aims (mouse only; touch has no hover), and only when the
+            // mouse moves. With Shift held it turns the aim by a fraction of
+            // the movement round the cue ball instead: fine aiming.
+            let fine =
+                aim.fine_pointer || keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+            match aim.hover {
+                Some((last, _, at)) if last == screen && at == cue => {}
+                Some((_, before, at)) if fine && at == cue => {
+                    let turned = (before - cue).angle_to(p - cue);
+                    if turned.is_finite() {
+                        aim.direction = DVec2::from_angle(turned * FINE_POINTER)
+                            .rotate(aim.direction)
+                            .normalize();
+                    }
+                }
+                _ => aim_at(&mut aim, p),
+            }
+            aim.hover = Some((screen, p, cue));
         }
     }
 

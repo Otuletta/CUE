@@ -79,6 +79,8 @@ enum Lifecycle {
 /// What the host's controls need to draw, refreshed every frame.
 #[derive(Debug, Clone, PartialEq)]
 struct Snapshot {
+    /// Aim direction as an angle on the table plane, radians.
+    aim_angle: f64,
     power: f64,
     tip: DVec2,
     at_rest: bool,
@@ -353,6 +355,22 @@ pub fn set_power(power: f64) -> Result<(), JsError> {
     game(GameCommand::SetPower(power))
 }
 
+/// Turns the aim by `radians`, counter-clockwise seen from above (towards
+/// the head rail when aiming at the far rail): fine aiming. Ignored while
+/// balls move.
+#[wasm_bindgen(js_name = turnAim)]
+pub fn turn_aim(radians: f64) -> Result<(), JsError> {
+    game(GameCommand::TurnAim(radians))
+}
+
+/// Whether `Shift` is held on the pointer, for fine aiming with the mouse.
+/// The wrapper reports it from pointer events, which carry the modifier even
+/// when the canvas does not have keyboard focus.
+#[wasm_bindgen(js_name = setFineAim)]
+pub fn set_fine_aim(on: bool) -> Result<(), JsError> {
+    game(GameCommand::SetFineAim(on))
+}
+
 /// Shoots with the current aim, power and spin. Ignored while balls move or
 /// if the power is too low to be intentional.
 #[wasm_bindgen]
@@ -479,6 +497,7 @@ pub fn state() -> JsValue {
     };
     object(&[
         ("mode", mode.into()),
+        ("aimAngle", s.aim_angle.into()),
         ("power", s.power.into()),
         ("tipX", s.tip.x.into()),
         ("tipY", s.tip.y.into()),
@@ -745,6 +764,7 @@ fn publish_state(
     last: Res<LastShot>,
 ) {
     let snapshot = Snapshot {
+        aim_angle: aim.direction.to_angle(),
         power: aim.power,
         tip: aim.tip,
         at_rest: sim.world.is_at_rest(),

@@ -16,6 +16,10 @@ import { STYLES } from './styles.js';
 const TOAST_MS = 2600;
 const MAX_TIP = 0.5;
 const SPIN_STEP = 0.05;
+/** Fine aim: radians per pixel dragged on the jog strip (0.05°). */
+const JOG_RADIANS_PER_PX = 0.000873;
+/** Fine aim: radians per arrow key press on the jog strip (0.25°; Shift 0.05°). */
+const JOG_KEY_STEP = 0.004363;
 
 const coarsePointer = () => window.matchMedia?.('(pointer: coarse)').matches ?? false;
 const escape = (s) =>
@@ -42,6 +46,7 @@ export function createOverlay(root, deps) {
   const power = $('input[name="power"]');
   const powerOut = $('.power output');
   const spin = $('.spin');
+  const jog = $('.jog');
   const dot = $('.spin .dot');
   const shootBtn = $('[data-action="shoot"]');
   const button = (action) => $(`[data-action="${action}"]`);
@@ -306,6 +311,54 @@ export function createOverlay(root, deps) {
     }
   });
 
+  // --- Fine aim -----------------------------------------------------------
+  // A jog strip: dragging it turns the aim by a small angle per pixel, so a
+  // finger can aim as finely as the keyboard. Its ridges slide along to show
+  // the movement.
+
+  let jogFrom = null;
+  let jogShift = 0;
+  const turn = (radians) => {
+    api.turnAim(radians);
+    jogShift = (jogShift - radians / JOG_RADIANS_PER_PX) % 24;
+    jog.style.setProperty('--shift', `${jogShift}px`);
+  };
+  jog.addEventListener('pointerdown', (e) => {
+    jog.setPointerCapture(e.pointerId);
+    jogFrom = e.clientX;
+  });
+  jog.addEventListener('pointermove', (e) => {
+    if (jogFrom === null || !jog.hasPointerCapture(e.pointerId)) return;
+    // Dragging right turns the aim clockwise on screen, as a wheel would.
+    turn(-(e.clientX - jogFrom) * JOG_RADIANS_PER_PX);
+    jogFrom = e.clientX;
+  });
+  const endJog = () => (jogFrom = null);
+  jog.addEventListener('pointerup', endJog);
+  jog.addEventListener('pointercancel', endJog);
+  jog.addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? JOG_KEY_STEP / 5 : JOG_KEY_STEP;
+    const by = { ArrowLeft: step, ArrowRight: -step }[e.key];
+    if (by !== undefined) {
+      turn(by);
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+
+  // --- Haptics ------------------------------------------------------------
+  // A short pulse on the strike and on each ball pocketed, on touch devices
+  // that can vibrate. It follows the sound setting: both are feedback.
+  const coarse = window.matchMedia?.('(pointer: coarse)');
+  const pulse = (ms) => {
+    if (!coarse?.matches || !settings.get().sound.enabled) return;
+    try {
+      navigator.vibrate?.(ms);
+    } catch {
+      // Not allowed here (no gesture yet, or a policy): stay silent.
+    }
+  };
+
   // --- Settings dialog ----------------------------------------------------
 
   function syncSettings() {
@@ -449,6 +502,8 @@ export function createOverlay(root, deps) {
     },
     /** Reacts to engine events with feedback a player can see and hear. */
     onEvent(name, detail) {
+      if (name === 'shot-start') pulse(18);
+      else if (name === 'ball-pocketed' && detail?.ballId !== 0) pulse(8);
       if (match.onEvent(name, detail)) return;
       if (name === 'shot-end' && detail && !detail.abandoned) {
         const balls = detail.pocketed.filter((p) => p.ballId !== 0).map((p) => t.ball(p.ballId));
@@ -537,6 +592,7 @@ function markup(t, { exit, locale, rulesUrl }) {
 
   <div class="dock">
     ${dockMarkup(t)}
+    <div class="jog" role="slider" tabindex="0" aria-label="${escape(t.fineAim)}" aria-valuetext="${escape(t.fineAimHint)}" title="${escape(t.fineAim)}"><span class="ridges" aria-hidden="true"></span></div>
     <div class="spin" role="slider" tabindex="0" aria-label="${escape(t.spin)}" aria-valuetext="${escape(t.spinValue(0, 0))}" title="${escape(t.spin)}"><span class="dot"></span></div>
     <label class="power"><span>${escape(t.power)}</span><input type="range" name="power" min="0" max="100" step="1" value="0"><output>0%</output></label>
     <button type="button" class="shoot" data-action="shoot">${escape(t.shoot)}</button>
