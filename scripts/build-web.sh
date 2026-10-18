@@ -51,9 +51,16 @@ if [[ "${WASM_OPT:-0}" == 1 ]]; then
   echo "wasm-opt: $before -> $(wc -c <"$wasm") bytes"
 fi
 
-cp web/package/src/*.js "$OUT/package/"
+cp web/package/src/*.js web/package/src/*.d.ts "$OUT/package/"
+cp web/package/README.md LICENSE-MIT LICENSE-APACHE "$OUT/package/"
 cp web/example-vanilla/{index.html,main.js,styles.css} "$OUT/"
 version=$(awk -F'"' '/^\[workspace.package\]/ { found = 1 } found && /^version/ { print $2; exit }' Cargo.toml)
+# The npm package carries the workspace version: one number for the whole
+# release (Rust crates, WASM, wrapper).
+node -e 'const fs = require("fs"); const [src, dst, v] = process.argv.slice(1);
+  const pkg = JSON.parse(fs.readFileSync(src, "utf8")); pkg.version = v;
+  fs.writeFileSync(dst, JSON.stringify(pkg, null, 2) + "\n");' \
+  web/package/package.json "$OUT/package/package.json" "$version"
 node scripts/manifest.mjs "$OUT/package" "$version"
 
 node scripts/size-report.mjs "$OUT"

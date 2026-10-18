@@ -1,0 +1,50 @@
+{
+  "name": "@tuletta/cue",
+  "version": "0.0.0-dev",
+  "description": "A billiards engine in Rust and WebAssembly: free play and two-player eight-ball, embeddable with one call.",
+  "type": "module",
+  "main": "./index.js",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./manifest.json": "./manifest.json",
+    "./pkg/*": "./pkg/*"
+  },
+  "files": [
+    "*.js",
+    "*.d.ts",
+    "manifest.json",
+    "pkg/",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "sideEffects": false,
+  "license": "MIT OR Apache-2.0",
+  "author": "Oscar Tuletta",
+  "homepage": "https://otuletta.github.io/CUE/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Otuletta/CUE.git",
+    "directory": "web/package"
+  },
+  "bugs": "https://github.com/Otuletta/CUE/issues",
+  "keywords": [
+    "billiards",
+    "pool",
+    "eight-ball",
+    "8-ball",
+    "game",
+    "webassembly",
+    "rust",
+    "bevy",
+    "physics"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

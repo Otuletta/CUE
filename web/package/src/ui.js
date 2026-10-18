@@ -31,7 +31,8 @@ export function createOverlay(root, deps) {
   host.className = 'cue-overlay';
   Object.assign(host.style, { position: 'absolute', inset: '0', pointerEvents: 'none' });
   const shadow = host.attachShadow({ mode: 'open' });
-  shadow.innerHTML = `<style>${STYLES}</style>${markup(t, { exit: Boolean(onExit), locale, rulesUrl })}`;
+  shadow.innerHTML = markup(t, { exit: Boolean(onExit), locale, rulesUrl });
+  adoptStyles(shadow);
   root.appendChild(host);
 
   const $ = (selector) => shadow.querySelector(selector);
@@ -396,8 +397,12 @@ export function createOverlay(root, deps) {
     showMessage(kind) {
       const card = $('[data-sheet="message"] .card');
       const unsupported = kind === 'unsupported';
-      card.querySelector('h2').textContent = unsupported ? t.unsupportedTitle : t.errorTitle;
-      card.querySelector('p').textContent = unsupported ? t.unsupportedBody : t.errorBody;
+      const text = {
+        unsupported: [t.unsupportedTitle, t.unsupportedBody],
+        reload: [t.reloadTitle, t.reloadBody],
+      }[kind] ?? [t.errorTitle, t.errorBody];
+      card.querySelector('h2').textContent = text[0];
+      card.querySelector('p').textContent = text[1];
       const link = card.querySelector('a');
       link.hidden = !fallbackUrl;
       if (fallbackUrl) link.href = fallbackUrl;
@@ -407,6 +412,11 @@ export function createOverlay(root, deps) {
     },
     showTutorial() {
       open('help');
+    },
+    /** Measures the bars again and tells the engine (after a move or restyle). */
+    remeasure() {
+      insets = null;
+      scheduleInsets();
     },
     setFullscreen(on) {
       fullscreen = on;
@@ -449,6 +459,23 @@ export function createOverlay(root, deps) {
       host.remove();
     },
   };
+}
+
+/**
+ * Styles the shadow root with a constructed stylesheet where the browser has
+ * them: unlike a `<style>` element, it needs no `'unsafe-inline'` in a host's
+ * Content Security Policy. Older browsers get the `<style>` element.
+ */
+function adoptStyles(shadow) {
+  if ('adoptedStyleSheets' in ShadowRoot.prototype && 'replaceSync' in CSSStyleSheet.prototype) {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(STYLES);
+    shadow.adoptedStyleSheets = [sheet];
+  } else {
+    const style = document.createElement('style');
+    style.textContent = STYLES;
+    shadow.prepend(style);
+  }
 }
 
 function markup(t, { exit, locale, rulesUrl }) {

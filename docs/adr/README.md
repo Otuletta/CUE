@@ -17,6 +17,7 @@ one.
 | [0009](0009-procedural-audio.md) | Procedural audio | accepted |
 | [0010](0010-eight-ball-rules-and-call-shot.md) | Eight-ball rules engine, profiles and call-shot interface | accepted |
 | [0011](0011-visual-direction-and-graphics-quality.md) | Visual direction, procedural assets and graphics quality | accepted |
+| [0012](0012-distribution-and-integration.md) | Distribution, integration and releases | accepted |
 
 Open decisions (camera, power mechanic and others) are listed in §31 of the
 [specification](../specification.es.md) and get an ADR when they are

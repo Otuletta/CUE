@@ -18,11 +18,30 @@ CUE has two parts that ship together:
 - **A library** that other sites can embed with one call and a container
   element. Embedding it does not require knowing Rust or Bevy.
 
-> **Status: Phase 5, visuals and polish.** Numbered balls, a modelled cue
-> with a stroke timed to the strike, table details, a camera that keeps the
-> balls clear of the controls, adaptive graphics quality and game sounds, on
-> top of local eight-ball (Phase 4) and free play. This README describes only
-> what exists; see the [roadmap](#roadmap).
+> **Status: `1.0.0-beta.1`, feature-complete and in testing.** Free play,
+> local eight-ball with WPA or casual rules, numbered balls and a modelled
+> cue, adaptive graphics, procedural sound, and an embeddable npm package
+> tested in a Vite app and under a strict CSP. Device testing is what
+> remains before 1.0. This README describes only what exists; see the
+> [roadmap](#roadmap).
+
+## Use it
+
+```sh
+npm install @tuletta/cue   # provisional name; see docs/releasing.md
+```
+
+```js
+const { createCue } = await import('@tuletta/cue');
+const game = await createCue({ container: document.querySelector('#cue') });
+game.on('rack-over', ({ winner }) => console.log(`rack to ${winner}`));
+```
+
+- **[Web integration](docs/web-integration.md):** plain HTML, Vite, React,
+  Vue and single-page apps; hosting, CDN and CSP.
+- **[API reference](docs/api.md):** options, methods, events, state and codes,
+  with [TypeScript declarations](web/package/src/index.d.ts).
+- **[Browser support](docs/browser-support.md):** what is tested, and how.
 
 ## What works today
 
@@ -93,9 +112,10 @@ CUE has two parts that ship together:
   three aiming-guide levels. Settings are validated and kept in `localStorage`
   under `cue:v1:*`.
 - **Embedding API:** `createCue({ container })` returns an instance with:
-  - lifecycle: `pause`, `resume`, `destroy`;
+  - lifecycle: `start`, `pause`, `resume`, `attach` (move to another
+    container, for single-page apps), `resize`, `destroy`;
   - table: `rerack`, `undo`, `shoot`, `setPower`, `setTip`;
-  - eight-ball: `newGame({ ruleset, breaker, raceTo, names })`, `freePlay`,
+  - eight-ball: `setMode`, `newGame({ ruleset, breaker, raceTo, names })`, `freePlay`,
     `callBall`, `callSafety`, `autoCall`, `decide`, `nextRack`, `stalemate`,
     `spotRequest`;
   - preferences: `setTheme`, `setAssists`, `setQuality`, `setAudio`;
@@ -179,14 +199,28 @@ in [docs/controls.md](docs/controls.md).
 | 0 ✓ | Skeleton, CI, first ADRs | `cargo check` and `cargo test` pass on a clean install |
 | 1 ✓ | Vertical slice in the browser | A simple table with a controllable shot in WASM, plus real size and FPS measurements |
 | 2 ✓ | Billiards engine | Critical physics cases pass; the solver produces a `ShotReport` |
-| 3 | Free Play (built; [usability test](docs/usability-test.md) in progress) | A first-time visitor can shoot, understand the result, reset and leave |
-| 4 | Local eight-ball (in review) | Every rule transition in scope is covered by tests |
-| **5** | Visuals, audio, polish (in review) | Approved on the device matrix with no physics regressions |
-| 6 | Open-source 1.0 | An outside developer can embed CUE using only the public docs |
+| 3 | Free Play (built; [usability test](docs/usability-test.md) pending) | A first-time visitor can shoot, understand the result, reset and leave |
+| 4 | Local eight-ball (built, in review) | Every rule transition in scope is covered by tests |
+| 5 | Visuals, audio, polish (built, device check pending) | Approved on the device matrix with no physics regressions |
+| **6** | Open-source 1.0 (`1.0.0-beta.1`; release after testing) | An outside developer can embed CUE using only the public docs |
 
 The full product and engineering specification (in Spanish) is in
-[`docs/specification.es.md`](docs/specification.es.md). Architecture decisions
-are in [`docs/adr`](docs/adr).
+[`docs/specification.es.md`](docs/specification.es.md).
+
+## Documentation
+
+| | |
+|---|---|
+| [Getting started](docs/getting-started.md) | Tools, build, and every check CI runs |
+| [Architecture](docs/architecture.md) | The crates and one shot from input to ruling |
+| [Physics model](docs/physics-model.md) | Equations, parameters, limits |
+| [Eight-ball rules](docs/rules-eight-ball.md) | WPA conformance, rule by rule |
+| [Web integration](docs/web-integration.md) · [API](docs/api.md) | Embedding CUE |
+| [Controls](docs/controls.md) · [Accessibility](docs/accessibility.md) | Playing CUE |
+| [Browser support](docs/browser-support.md) · [Assets](docs/assets.md) | What is tested; what ships |
+| [Releasing](docs/releasing.md) · [Changelog](CHANGELOG.md) | Versions and releases |
+| [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) | Working on CUE |
+| [Decisions](docs/adr) | 12 ADRs with their trade-offs |
 
 ## License
 
