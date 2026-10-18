@@ -14,6 +14,11 @@
 //! repeated contacts do not sound mechanical (spec §13.2). Clips are
 //! deterministic: the same sound, variant and sample rate always render the
 //! same samples.
+//!
+//! Three short, quiet cues mark the game itself (spec §13.1): a turn
+//! passing, a foul and a win. They use the same synthesis with a soft,
+//! marimba-like timbre, and they are never the only signal: every one has a
+//! visible counterpart.
 
 #![warn(missing_docs)]
 
@@ -30,17 +35,31 @@ pub enum Sound {
     Pocket,
     /// The cue tip striking the cue ball.
     CueTip,
+    /// The other player comes to the table: one soft note.
+    Turn,
+    /// A foul: two low notes, falling.
+    Foul,
+    /// A rack won: three notes rising, a major chord.
+    Win,
 }
 
 impl Sound {
     /// Every sound, in a stable order.
-    pub const ALL: [Self; 4] = [Self::BallClick, Self::Cushion, Self::Pocket, Self::CueTip];
+    pub const ALL: [Self; 7] = [
+        Self::BallClick,
+        Self::Cushion,
+        Self::Pocket,
+        Self::CueTip,
+        Self::Turn,
+        Self::Foul,
+        Self::Win,
+    ];
 
     fn recipe(self) -> Recipe {
         match self {
             Self::BallClick => Recipe {
                 length: 0.12,
-                hits: &[(0.0, 1.0)],
+                hits: &[(0.0, 1.0, 1.0)],
                 modes: &[
                     Mode {
                         freq: 3150.0,
@@ -68,10 +87,12 @@ impl Sound {
                     decay: 0.0015,
                     cutoff: 9000.0,
                 },
+                detune: IMPACT_DETUNE,
+                fade_in: IMPACT_FADE_IN,
             },
             Self::Cushion => Recipe {
                 length: 0.22,
-                hits: &[(0.0, 1.0)],
+                hits: &[(0.0, 1.0, 1.0)],
                 modes: &[
                     Mode {
                         freq: 160.0,
@@ -94,11 +115,18 @@ impl Sound {
                     decay: 0.004,
                     cutoff: 2500.0,
                 },
+                detune: IMPACT_DETUNE,
+                fade_in: IMPACT_FADE_IN,
             },
             Self::Pocket => Recipe {
                 length: 0.45,
                 // A thud, then the ball rattling down the liner.
-                hits: &[(0.0, 1.0), (0.045, 0.32), (0.09, 0.2), (0.15, 0.1)],
+                hits: &[
+                    (0.0, 1.0, 1.0),
+                    (0.045, 0.32, 1.0),
+                    (0.09, 0.2, 1.0),
+                    (0.15, 0.1, 1.0),
+                ],
                 modes: &[
                     Mode {
                         freq: 95.0,
@@ -121,10 +149,12 @@ impl Sound {
                     decay: 0.006,
                     cutoff: 1800.0,
                 },
+                detune: IMPACT_DETUNE,
+                fade_in: IMPACT_FADE_IN,
             },
             Self::CueTip => Recipe {
                 length: 0.08,
-                hits: &[(0.0, 1.0)],
+                hits: &[(0.0, 1.0, 1.0)],
                 modes: &[
                     Mode {
                         freq: 1400.0,
@@ -142,6 +172,34 @@ impl Sound {
                     decay: 0.002,
                     cutoff: 4000.0,
                 },
+                detune: IMPACT_DETUNE,
+                fade_in: IMPACT_FADE_IN,
+            },
+            Self::Turn => Recipe {
+                length: 0.6,
+                hits: &[(0.0, 1.0, 1.0)],
+                modes: CHIME,
+                noise: CHIME_NOISE,
+                detune: CUE_DETUNE,
+                fade_in: CUE_FADE_IN,
+            },
+            Self::Foul => Recipe {
+                length: 0.7,
+                // A falling minor third, an octave below the turn cue.
+                hits: &[(0.0, 1.0, 0.5), (0.13, 0.85, 0.42)],
+                modes: CHIME,
+                noise: CHIME_NOISE,
+                detune: CUE_DETUNE,
+                fade_in: CUE_FADE_IN,
+            },
+            Self::Win => Recipe {
+                length: 1.2,
+                // Root, major third, fifth.
+                hits: &[(0.0, 0.8, 0.6), (0.11, 0.85, 0.75), (0.22, 1.0, 0.9)],
+                modes: CHIME,
+                noise: CHIME_NOISE,
+                detune: CUE_DETUNE,
+                fade_in: CUE_FADE_IN,
             },
         }
     }
@@ -152,6 +210,9 @@ impl Sound {
             Self::Cushion => 1,
             Self::Pocket => 2,
             Self::CueTip => 3,
+            Self::Turn => 4,
+            Self::Foul => 5,
+            Self::Win => 6,
         }
     }
 }
@@ -178,17 +239,51 @@ struct Noise {
 struct Recipe {
     /// Clip length, seconds.
     length: f32,
-    /// `(offset, gain)` of each excitation; most sounds have one.
-    hits: &'static [(f32, f32)],
+    /// `(offset, gain, pitch)` of each excitation; most sounds have one.
+    /// `pitch` scales every mode's frequency, so one recipe can play notes.
+    hits: &'static [(f32, f32, f32)],
     modes: &'static [Mode],
     noise: Noise,
+    /// Largest random detuning between variants, as a fraction.
+    detune: f32,
+    /// Fade-in that avoids a click at each note's start, seconds.
+    fade_in: f32,
 }
+
+/// Impacts vary a lot between variants: no two clicks sound alike.
+const IMPACT_DETUNE: f32 = 0.06;
+const IMPACT_FADE_IN: f32 = 0.0002;
+/// Cues must stay in tune, and start softly.
+const CUE_DETUNE: f32 = 0.004;
+const CUE_FADE_IN: f32 = 0.004;
+
+/// A soft, marimba-like note on A5 (pitch 1): a fundamental and the bar's
+/// first overtone near four times higher, which dies away quickly.
+const CHIME: &[Mode] = &[
+    Mode {
+        freq: 880.0,
+        decay: 0.13,
+        gain: 1.0,
+    },
+    Mode {
+        freq: 880.0 * 3.93,
+        decay: 0.03,
+        gain: 0.16,
+    },
+    Mode {
+        freq: 880.0 * 2.0,
+        decay: 0.06,
+        gain: 0.1,
+    },
+];
+const CHIME_NOISE: Noise = Noise {
+    gain: 0.04,
+    decay: 0.002,
+    cutoff: 3000.0,
+};
 
 /// Peak amplitude of every rendered clip.
 pub const PEAK: f32 = 0.9;
-
-/// Length of the fade-in that avoids a click at the clip start, seconds.
-const FADE_IN: f32 = 0.0002;
 
 /// Renders one variant of a sound as mono samples in `[-PEAK, PEAK]`.
 pub fn render(sound: Sound, variant: u32, sample_rate: f32) -> Vec<f32> {
@@ -198,13 +293,13 @@ pub fn render(sound: Sound, variant: u32, sample_rate: f32) -> Vec<f32> {
     let mut out = vec![0.0f32; len];
     let dt = 1.0 / sample_rate;
 
-    // Detune each mode by up to ±3 % and vary its decay by ±10 %.
+    // Detune each mode (±3 % for impacts) and vary its decay by ±10 %.
     let modes: Vec<(Mode, f32)> = recipe
         .modes
         .iter()
         .map(|m| {
             let mode = Mode {
-                freq: m.freq * (1.0 + 0.06 * (rng.unit() - 0.5)),
+                freq: m.freq * (1.0 + recipe.detune * (rng.unit() - 0.5)),
                 decay: m.decay * (1.0 + 0.2 * (rng.unit() - 0.5)),
                 gain: m.gain,
             };
@@ -214,18 +309,20 @@ pub fn render(sound: Sound, variant: u32, sample_rate: f32) -> Vec<f32> {
     // One-pole low-pass coefficient for the noise burst.
     let alpha = 1.0 - (-TAU * recipe.noise.cutoff * dt).exp();
 
-    for &(offset, hit_gain) in recipe.hits {
+    for &(offset, hit_gain, pitch) in recipe.hits {
         let start = (offset * sample_rate).round() as usize;
         let mut filtered = 0.0f32;
         for (k, sample) in out.iter_mut().enumerate().skip(start) {
             let t = (k - start) as f32 * dt;
             let tonal: f32 = modes
                 .iter()
-                .map(|(m, phase)| m.gain * (-t / m.decay).exp() * (TAU * m.freq * t + phase).sin())
+                .map(|(m, phase)| {
+                    m.gain * (-t / m.decay).exp() * (TAU * m.freq * pitch * t + phase).sin()
+                })
                 .sum();
             filtered += alpha * (rng.signed() - filtered);
             let noise = recipe.noise.gain * (-t / recipe.noise.decay).exp() * filtered;
-            let fade = (t / FADE_IN).min(1.0);
+            let fade = (t / recipe.fade_in).min(1.0);
             *sample += hit_gain * fade * (tonal + noise);
         }
     }
@@ -336,6 +433,32 @@ mod tests {
             let b = render(sound, 0, 48_000.0).len() as f32 / 48_000.0;
             assert!((a - b).abs() < 1e-3);
         }
+    }
+
+    #[test]
+    fn the_win_cue_rises_and_the_foul_cue_falls() {
+        // Dominant frequency of a window, by zero crossings.
+        let pitch = |clip: &[f32], from: f32, to: f32| {
+            let (a, b) = ((from * RATE) as usize, (to * RATE) as usize);
+            zero_crossings(&clip[a..b]) * RATE / 2.0
+        };
+        let win = render(Sound::Win, 0, RATE);
+        let (first, last) = (pitch(&win, 0.01, 0.1), pitch(&win, 0.24, 0.34));
+        assert!(last > 1.3 * first, "win: {first} Hz then {last} Hz");
+        let foul = render(Sound::Foul, 0, RATE);
+        let (first, second) = (pitch(&foul, 0.01, 0.12), pitch(&foul, 0.15, 0.26));
+        assert!(second < 0.95 * first, "foul: {first} Hz then {second} Hz");
+        // Cues are notes, not clicks: far below the ball click.
+        let click = zero_crossings(&render(Sound::BallClick, 0, RATE));
+        assert!(zero_crossings(&render(Sound::Turn, 0, RATE)) < click / 2.0);
+    }
+
+    #[test]
+    fn cue_variants_stay_in_tune() {
+        let a = render(Sound::Turn, 0, RATE);
+        let b = render(Sound::Turn, 3, RATE);
+        let pitch = |c: &[f32]| zero_crossings(&c[480..4800]);
+        assert!((pitch(&a) - pitch(&b)).abs() / pitch(&a) < 0.02);
     }
 
     #[test]

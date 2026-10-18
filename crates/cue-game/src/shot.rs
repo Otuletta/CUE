@@ -19,13 +19,15 @@
 
 use bevy::{input::touch::Touches, prelude::*, window::PrimaryWindow};
 use cue_core::{
-    BallId,
+    BallId, Layout,
     glam::{DVec2, DVec3},
     rules::eight_ball::Call,
 };
 use cue_physics::{MAX_TIP_OFFSET, Motion, Strike};
 
 use crate::{
+    camera::ViewInsets,
+    cue_stick::CueStick,
     eight::{self, Mode},
     settings::{Assists, DevHud, GameCommand, Theme},
     sim::{GameEvent, HandRegion, Paused, Simulation},
@@ -48,13 +50,17 @@ const KEY_PLACE_SPEED: f64 = 0.4;
 /// A press within this many radii of the cue ball picks it up when in hand.
 const PICK_RADII: f64 = 1.6;
 
-const CUE_LENGTH: f32 = 1.45;
-const CUE_TIP_RADIUS: f32 = 0.0065;
-const CUE_BUTT_RADIUS: f32 = 0.015;
 /// Butt elevation, radians: a level cue would clip the rail.
 const CUE_ELEVATION: f32 = 0.07;
+/// Gap between the tip and the ball while aiming, metres.
+const CUE_REST_GAP: f32 = 0.012;
 /// How far the stick pulls back at full power, metres.
 const CUE_MAX_DRAWBACK: f32 = 0.22;
+/// Shortest and longest forward swing, seconds.
+const SWING_TIME: (f64, f64) = (0.05, 0.3);
+/// How long, and how far, the stick follows through after contact.
+const FOLLOW_TIME: f32 = 0.14;
+const FOLLOW_DISTANCE: f32 = 0.05;
 
 /// The shot being prepared.
 #[derive(Resource, Debug, Clone)]
@@ -94,30 +100,60 @@ enum Gesture {
     Place { touch: Option<u64>, valid: bool },
 }
 
-/// Marker for the cue stick mesh.
-#[derive(Component, Debug)]
-pub(crate) struct CueStick;
+/// The cue's swing. Shooting does not strike at once: the stick swings
+/// forward from where it was drawn back, and the strike, fixed when the
+/// player shot, happens as the tip meets the ball. A short follow-through
+/// comes after. With reduced motion there is no swing (spec §7.3).
+#[derive(Resource, Debug, Default)]
+pub(crate) enum Stroke {
+    /// Nothing in progress.
+    #[default]
+    Idle,
+    /// Swinging towards the ball.
+    Forward {
+        strike: Strike,
+        /// Ball positions when the player shot, for the rules.
+        before: Option<Layout>,
+        /// Gap between tip and ball when the swing started, metres.
+        from: f32,
+        elapsed: f32,
+        duration: f32,
+    },
+    /// After contact: the stick carries on a little along its line.
+    FollowThrough {
+        /// Where the tip met the ball, and the cue's axis towards the butt.
+        contact: Vec3,
+        axis: Vec3,
+        elapsed: f32,
+    },
+}
 
-pub(crate) fn spawn_cue(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    commands.spawn((
-        CueStick,
-        Mesh3d(meshes.add(ConicalFrustum {
-            radius_top: CUE_BUTT_RADIUS,
-            radius_bottom: CUE_TIP_RADIUS,
-            height: CUE_LENGTH,
-        })),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.78, 0.62, 0.42),
-            perceptual_roughness: 0.35,
-            ..default()
-        })),
-        Transform::default(),
-        Visibility::Hidden,
-    ));
+impl Stroke {
+    /// Whether the stick is on its way to the ball: the shot is committed.
+    pub(crate) fn swinging(&self) -> bool {
+        matches!(self, Self::Forward { .. })
+    }
+}
+
+/// Whether the player asked for reduced motion; the cue then strikes without
+/// a swing.
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReducedMotion(pub bool);
+
+/// Where the stick's tip is, and its axis towards the butt, for a cue ball
+/// centred at `centre` with radius `r`, `gap` metres behind the contact.
+fn cue_pose(centre: Vec3, r: f32, aim: &Aim, gap: f32) -> (Vec3, Vec3) {
+    let dir = DVec3::new(aim.direction.x, 0.0, aim.direction.y).as_vec3();
+    // Tip just behind the ball, butt raised.
+    let axis = (-dir * CUE_ELEVATION.cos() + Vec3::Y * CUE_ELEVATION.sin()).normalize();
+    let side = dir.cross(Vec3::Y);
+    let tip_point = centre + (side * aim.tip.x as f32 + Vec3::Y * aim.tip.y as f32) * r;
+    (tip_point + axis * (r + gap), axis)
+}
+
+/// The gap the stick is drawn back to at a charged `power`.
+fn drawback(power: f64) -> f32 {
+    CUE_REST_GAP + CUE_MAX_DRAWBACK * power as f32
 }
 
 /// Projects a screen position onto the plane through the ball centres.
@@ -133,16 +169,33 @@ fn table_point(
     Some(DVec2::new(f64::from(p.x), f64::from(p.z)))
 }
 
-/// Shoots with the current aim. Refuses soft "shots" below
-/// [`MIN_SHOT_POWER`] and, in eight-ball, shots the rules cannot take yet.
+/// Shoots with the current aim, writing [`GameEvent::ShotRefused`] when the
+/// rules refuse it.
 fn fire(
     sim: &mut Simulation,
     aim: &mut Aim,
     mode: &mut Mode,
+    stroke: &mut Stroke,
+    motion: ReducedMotion,
     events: &mut MessageWriter<GameEvent>,
 ) {
-    if aim.power < MIN_SHOT_POWER {
-        return;
+    if let Err(why) = shoot(sim, aim, mode, stroke, motion) {
+        events.write(GameEvent::ShotRefused(why));
+    }
+}
+
+/// Starts a shot with the current aim: the swing, or with reduced motion the
+/// strike itself. Ignores soft "shots" below [`MIN_SHOT_POWER`] and a second
+/// shot during a swing; in eight-ball, returns why the rules refuse it.
+fn shoot(
+    sim: &mut Simulation,
+    aim: &mut Aim,
+    mode: &mut Mode,
+    stroke: &mut Stroke,
+    motion: ReducedMotion,
+) -> Result<(), &'static str> {
+    if aim.power < MIN_SHOT_POWER || !matches!(stroke, Stroke::Idle) {
+        return Ok(());
     }
     let before = match mode {
         Mode::FreePlay => None,
@@ -151,10 +204,7 @@ fn fire(
             if !session.manual_call {
                 session.call = eight::auto_call(session, sim, aim.direction);
             }
-            if let Err(why) = session.can_shoot() {
-                events.write(GameEvent::ShotRefused(why));
-                return;
-            }
+            session.can_shoot()?;
             Some(sim.layout())
         }
     };
@@ -163,6 +213,33 @@ fn fire(
         power: aim.power.powf(POWER_EXPONENT),
         tip_offset: aim.tip,
     };
+    if motion.0 {
+        strike_now(sim, aim, mode, strike, before);
+        return Ok(());
+    }
+    // A swing that peaks at the cue ball's speed covers the drawback in
+    // twice the time a constant speed would.
+    let from = drawback(aim.power);
+    let speed = strike.power * sim.world.profile().cue.max_speed;
+    let duration = (2.0 * f64::from(from) / speed.max(1e-3)).clamp(SWING_TIME.0, SWING_TIME.1);
+    *stroke = Stroke::Forward {
+        strike,
+        before,
+        from,
+        elapsed: 0.0,
+        duration: duration as f32,
+    };
+    Ok(())
+}
+
+/// The strike proper. Returns whether the world accepted it.
+fn strike_now(
+    sim: &mut Simulation,
+    aim: &mut Aim,
+    mode: &mut Mode,
+    strike: Strike,
+    before: Option<Layout>,
+) -> bool {
     match sim.strike(strike) {
         Ok(()) => {
             aim.power = 0.0;
@@ -171,8 +248,74 @@ fn fire(
                 // Eight-ball has no undo.
                 sim.clear_undo();
             }
+            true
         }
-        Err(e) => warn!("strike rejected: {e}"),
+        Err(e) => {
+            warn!("strike rejected: {e}");
+            false
+        }
+    }
+}
+
+/// Moves the swing on, and strikes when the tip reaches the ball.
+pub(crate) fn advance_stroke(
+    time: Res<Time>,
+    paused: Res<Paused>,
+    mut stroke: ResMut<Stroke>,
+    mut sim: ResMut<Simulation>,
+    mut aim: ResMut<Aim>,
+    mut mode: ResMut<Mode>,
+) {
+    if paused.0 || matches!(*stroke, Stroke::Idle) {
+        return;
+    }
+    step_stroke(
+        &mut stroke,
+        time.delta_secs(),
+        &mut sim,
+        &mut aim,
+        &mut mode,
+    );
+}
+
+/// One frame of the swing: `dt` seconds later, strike on contact, or end
+/// the follow-through.
+fn step_stroke(stroke: &mut Stroke, dt: f32, sim: &mut Simulation, aim: &mut Aim, mode: &mut Mode) {
+    let next = match stroke {
+        Stroke::Idle => None,
+        Stroke::Forward {
+            strike,
+            before,
+            elapsed,
+            duration,
+            ..
+        } => {
+            *elapsed += dt;
+            (*elapsed >= *duration).then(|| {
+                let (strike, before) = (*strike, before.take());
+                let r = sim.table().ball.radius as f32;
+                let contact = sim
+                    .cue_position()
+                    .map(|c| cue_pose(DVec3::new(c.x, f64::from(r), c.y).as_vec3(), r, aim, 0.0));
+                match contact {
+                    Some((contact, axis)) if strike_now(sim, aim, mode, strike, before) => {
+                        Stroke::FollowThrough {
+                            contact,
+                            axis,
+                            elapsed: 0.0,
+                        }
+                    }
+                    _ => Stroke::Idle,
+                }
+            })
+        }
+        Stroke::FollowThrough { elapsed, .. } => {
+            *elapsed += dt;
+            (*elapsed >= FOLLOW_TIME).then_some(Stroke::Idle)
+        }
+    };
+    if let Some(next) = next {
+        *stroke = next;
     }
 }
 
@@ -207,6 +350,8 @@ pub(crate) fn apply_commands(
     mut theme: ResMut<Theme>,
     mut assists: ResMut<Assists>,
     mut dev: ResMut<DevHud>,
+    mut insets: ResMut<ViewInsets>,
+    (mut stroke, mut motion): (ResMut<Stroke>, ResMut<ReducedMotion>),
     mut events: MessageWriter<GameEvent>,
 ) {
     for command in commands.read() {
@@ -214,6 +359,8 @@ pub(crate) fn apply_commands(
             GameCommand::SetTheme(t) if *theme != *t => *theme = *t,
             GameCommand::SetAssists(a) if *assists != *a => *assists = *a,
             GameCommand::ToggleDevHud => dev.0 = !dev.0,
+            GameCommand::SetViewInsets(i) if *insets != *i => *insets = *i,
+            GameCommand::SetReducedMotion(on) if motion.0 != *on => motion.0 = *on,
             GameCommand::SetTip(t) if t.is_finite() => {
                 aim.tip = t.clamp_length_max(MAX_TIP_OFFSET);
             }
@@ -224,14 +371,23 @@ pub(crate) fn apply_commands(
                     tip: aim.tip,
                     ..Aim::default()
                 };
+                *stroke = Stroke::Idle;
             }
-            // Everything below acts on the table, which a paused game must not.
-            _ if paused.0 => {}
+            // Everything below acts on the table, which a paused game must
+            // not, and a committed swing has already decided.
+            _ if paused.0 || stroke.swinging() => {}
             GameCommand::SetPower(p) if p.is_finite() && sim.world.is_at_rest() => {
                 aim.power = p.clamp(0.0, 1.0);
             }
             GameCommand::Shoot if sim.world.is_at_rest() => {
-                fire(&mut sim, &mut aim, &mut mode, &mut events);
+                fire(
+                    &mut sim,
+                    &mut aim,
+                    &mut mode,
+                    &mut stroke,
+                    *motion,
+                    &mut events,
+                );
             }
             GameCommand::Undo => undo(&mut sim, &mut aim, &mode, &mut events),
             GameCommand::Rerack => rerack(&mut sim, &mut aim, &mode, &mut events),
@@ -253,12 +409,13 @@ pub(crate) fn read_input(
     mut aim: ResMut<Aim>,
     mut mode: ResMut<Mode>,
     mut dev: ResMut<DevHud>,
+    (mut stroke, motion): (ResMut<Stroke>, Res<ReducedMotion>),
     mut events: MessageWriter<GameEvent>,
 ) {
     if keys.just_pressed(KeyCode::Backquote) {
         dev.0 = !dev.0;
     }
-    if paused.0 {
+    if paused.0 || stroke.swinging() {
         aim.gesture = None;
         return;
     }
@@ -361,8 +518,18 @@ pub(crate) fn read_input(
             }
             if released {
                 aim.gesture = None;
-                fire(&mut sim, &mut aim, &mut mode, &mut events);
-                aim.power = 0.0;
+                fire(
+                    &mut sim,
+                    &mut aim,
+                    &mut mode,
+                    &mut stroke,
+                    *motion,
+                    &mut events,
+                );
+                // Keep the drawback while the stick swings; reset otherwise.
+                if !stroke.swinging() {
+                    aim.power = 0.0;
+                }
                 return;
             }
         }
@@ -414,7 +581,14 @@ pub(crate) fn read_input(
         }
     }
     if keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::Enter) {
-        fire(&mut sim, &mut aim, &mut mode, &mut events);
+        fire(
+            &mut sim,
+            &mut aim,
+            &mut mode,
+            &mut stroke,
+            *motion,
+            &mut events,
+        );
     }
 }
 
@@ -429,12 +603,31 @@ pub(crate) fn draw_aim(
     mode: Res<Mode>,
     assists: Res<Assists>,
     theme: Res<Theme>,
+    stroke: Res<Stroke>,
     mut gizmos: Gizmos,
     mut stick: Query<(&mut Transform, &mut Visibility), With<CueStick>>,
 ) {
     let Ok((mut transform, mut visibility)) = stick.single_mut() else {
         return;
     };
+    let mut place_stick = |tip: Vec3, axis: Vec3| {
+        transform.translation = tip;
+        transform.rotation = Quat::from_rotation_arc(Vec3::Y, axis);
+    };
+    // After contact the stick carries on along its line, easing out, while
+    // the cue ball runs away from it.
+    if let Stroke::FollowThrough {
+        contact,
+        axis,
+        elapsed,
+    } = *stroke
+    {
+        let t = (elapsed / FOLLOW_TIME).clamp(0.0, 1.0);
+        let ease = 1.0 - (1.0 - t) * (1.0 - t);
+        place_stick(contact - axis * FOLLOW_DISTANCE * ease, axis);
+        *visibility = Visibility::Inherited;
+        return;
+    }
     let Some(cue) = sim
         .cue_position()
         .filter(|_| sim.world.is_at_rest())
@@ -483,15 +676,22 @@ pub(crate) fn draw_aim(
     }
     *visibility = Visibility::Inherited;
 
-    let dir = DVec3::new(aim.direction.x, 0.0, aim.direction.y).as_vec3();
-    // Stick: tip just behind the ball, drawn back with power, butt raised.
-    let axis = (-dir * CUE_ELEVATION.cos() + Vec3::Y * CUE_ELEVATION.sin()).normalize();
-    let side = dir.cross(Vec3::Y);
-    let tip_point = centre + (side * aim.tip.x as f32 + Vec3::Y * aim.tip.y as f32) * r as f32;
-    let gap = 0.012 + CUE_MAX_DRAWBACK * aim.power as f32;
-    let tip = tip_point + axis * (r as f32 + gap);
-    transform.translation = tip + axis * CUE_LENGTH / 2.0;
-    transform.rotation = Quat::from_rotation_arc(Vec3::Y, axis);
+    // Stick: drawn back with power, or swinging in with a quadratic ease, so
+    // it is fastest as it meets the ball.
+    let gap = match *stroke {
+        Stroke::Forward {
+            from,
+            elapsed,
+            duration,
+            ..
+        } => {
+            let t = (elapsed / duration).clamp(0.0, 1.0);
+            from * (1.0 - t * t)
+        }
+        _ => drawback(aim.power),
+    };
+    let (tip, axis) = cue_pose(centre, r as f32, &aim, gap);
+    place_stick(tip, axis);
 
     if *assists == Assists::Off {
         return;
@@ -575,5 +775,177 @@ pub(crate) fn first_contact(sim: &Simulation, from: DVec2, dir: DVec2) -> Target
         end: from + dir * best.0.min(10.0),
         object: best.1.map(|(_, p)| p),
         ball: best.1.map(|(id, _)| id),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use cue_core::rules::{
+        Ruleset, Seat,
+        eight_ball::{Decision, Next, Ruling, Situation},
+    };
+
+    use super::*;
+    use crate::eight::GameSetup;
+
+    fn charged(power: f64) -> Aim {
+        Aim {
+            power,
+            ..Aim::default()
+        }
+    }
+
+    /// Steps the swing in 10 ms frames until it settles; returns the frames
+    /// it took to strike.
+    fn swing(stroke: &mut Stroke, sim: &mut Simulation, aim: &mut Aim, mode: &mut Mode) -> u32 {
+        let mut frames = 0;
+        while stroke.swinging() {
+            assert!(sim.world.is_at_rest(), "no strike before contact");
+            step_stroke(stroke, 0.01, sim, aim, mode);
+            frames += 1;
+            assert!(frames < 100, "the swing never ended");
+        }
+        frames
+    }
+
+    #[test]
+    fn the_strike_lands_when_the_swing_reaches_the_ball() {
+        let mut sim = Simulation::new(4);
+        let (mut aim, mut mode, mut stroke) = (charged(1.0), Mode::FreePlay, Stroke::Idle);
+        shoot(
+            &mut sim,
+            &mut aim,
+            &mut mode,
+            &mut stroke,
+            ReducedMotion(false),
+        )
+        .unwrap();
+        assert!(stroke.swinging());
+        assert_eq!(
+            aim.power, 1.0,
+            "the stick keeps its drawback while swinging"
+        );
+        let frames = swing(&mut stroke, &mut sim, &mut aim, &mut mode);
+        assert!(
+            (5..=7).contains(&frames),
+            "a full-power swing is short: {frames}"
+        );
+        assert!(!sim.world.is_at_rest(), "struck at contact");
+        assert!(matches!(stroke, Stroke::FollowThrough { .. }));
+        for _ in 0..20 {
+            step_stroke(&mut stroke, 0.01, &mut sim, &mut aim, &mut mode);
+        }
+        assert!(matches!(stroke, Stroke::Idle));
+    }
+
+    #[test]
+    fn soft_shots_swing_longer_but_never_forever() {
+        let mut sim = Simulation::new(4);
+        let (mut aim, mut mode, mut stroke) = (charged(0.05), Mode::FreePlay, Stroke::Idle);
+        shoot(
+            &mut sim,
+            &mut aim,
+            &mut mode,
+            &mut stroke,
+            ReducedMotion(false),
+        )
+        .unwrap();
+        let frames = swing(&mut stroke, &mut sim, &mut aim, &mut mode);
+        assert!(frames <= 31, "{frames}");
+        assert!(!sim.world.is_at_rest());
+    }
+
+    #[test]
+    fn reduced_motion_strikes_at_once() {
+        let mut sim = Simulation::new(4);
+        let (mut aim, mut mode, mut stroke) = (charged(0.5), Mode::FreePlay, Stroke::Idle);
+        shoot(
+            &mut sim,
+            &mut aim,
+            &mut mode,
+            &mut stroke,
+            ReducedMotion(true),
+        )
+        .unwrap();
+        assert!(matches!(stroke, Stroke::Idle));
+        assert!(!sim.world.is_at_rest());
+    }
+
+    #[test]
+    fn soft_or_repeated_shots_are_ignored() {
+        let mut sim = Simulation::new(4);
+        let (mut aim, mut mode, mut stroke) = (charged(0.01), Mode::FreePlay, Stroke::Idle);
+        shoot(
+            &mut sim,
+            &mut aim,
+            &mut mode,
+            &mut stroke,
+            ReducedMotion(false),
+        )
+        .unwrap();
+        assert!(matches!(stroke, Stroke::Idle), "below the minimum power");
+        aim.power = 0.8;
+        shoot(
+            &mut sim,
+            &mut aim,
+            &mut mode,
+            &mut stroke,
+            ReducedMotion(false),
+        )
+        .unwrap();
+        let Stroke::Forward { duration, .. } = stroke else {
+            panic!("{stroke:?}")
+        };
+        aim.power = 0.2;
+        shoot(
+            &mut sim,
+            &mut aim,
+            &mut mode,
+            &mut stroke,
+            ReducedMotion(false),
+        )
+        .unwrap();
+        assert!(
+            matches!(stroke, Stroke::Forward { duration: d, .. } if (d - duration).abs() < 1e-9),
+            "a committed swing is not replaced"
+        );
+    }
+
+    #[test]
+    fn eight_ball_refusals_come_back_and_nothing_swings() {
+        let setup = GameSetup {
+            ruleset: Ruleset::EightBallWpa,
+            breaker: Some(Seat::A),
+            race_to: 1,
+            names: ["A".into(), "B".into()],
+        };
+        let mut sim = Simulation::new(4);
+        let mut mode = Mode::FreePlay;
+        crate::eight::start_for_tests(&mut mode, &setup);
+        let Mode::EightBall(session) = &mut mode else {
+            unreachable!()
+        };
+        session.game.apply(&Ruling {
+            shooter: Seat::A,
+            fouls: vec![],
+            pocketed: vec![],
+            assigned: None,
+            next: Next::Decide(Decision {
+                chooser: Seat::B,
+                situation: Situation::IllegalBreak,
+                options: vec![],
+                cue_ball_off: false,
+            }),
+        });
+        let (mut aim, mut stroke) = (charged(0.5), Stroke::Idle);
+        let refused = shoot(
+            &mut sim,
+            &mut aim,
+            &mut mode,
+            &mut stroke,
+            ReducedMotion(false),
+        );
+        assert_eq!(refused, Err("decision-pending"));
+        assert!(matches!(stroke, Stroke::Idle));
     }
 }

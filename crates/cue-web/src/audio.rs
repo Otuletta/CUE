@@ -139,6 +139,20 @@ pub(crate) fn play_event(kind: &SimEventKind) -> bool {
     })
 }
 
+/// Plays one of the game cues (turn, foul, win), quietly: they mark the game,
+/// they must not drown the table.
+pub(crate) fn play_cue(sound: Sound) {
+    const CUE_GAIN: f32 = 0.35;
+    if !ENABLED.get() {
+        return;
+    }
+    ENGINE.with(|slot| {
+        if let Some(engine) = slot.borrow().as_ref() {
+            let _ = engine.play(sound, CUE_GAIN, 1.0);
+        }
+    });
+}
+
 /// Which clip an event plays, how loud and at what playback rate. Harder
 /// contacts are louder and very slightly higher; whispers are skipped.
 pub(crate) fn voice(kind: &SimEventKind) -> Option<(Sound, f32, f32)> {

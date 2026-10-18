@@ -7,6 +7,8 @@
 //! - `CUE_SHOT=<angle_deg>,<power>` strikes the cue ball on the first frame.
 //! - `CUE_SCREENSHOT=<path>` saves a screenshot after `CUE_SCREENSHOT_AT`
 //!   seconds (default 1.5) and exits shortly after.
+//! - `CUE_SIZE=<width>x<height>` sets the window size (default 1280x720), to
+//!   inspect details such as ball numbers at high resolution.
 
 use bevy::{
     prelude::*,
@@ -17,11 +19,18 @@ use cue_game::{Assists, CuePlugin, DevHud, Simulation, Theme};
 use cue_physics::Strike;
 
 fn main() -> AppExit {
+    let size = std::env::var("CUE_SIZE")
+        .ok()
+        .and_then(|v| {
+            let (w, h) = v.split_once('x')?;
+            Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?))
+        })
+        .unwrap_or((1280, 720));
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "CUE sandbox".into(),
-                resolution: (1280, 720).into(),
+                resolution: size.into(),
                 ..default()
             }),
             ..default()

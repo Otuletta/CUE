@@ -11,18 +11,23 @@
 
 mod ball_texture;
 mod camera;
+mod cue_stick;
 mod eight;
 mod hud;
+mod quality;
 mod scene;
 mod settings;
 mod shot;
 mod sim;
+mod textures;
 
 use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*};
 
+pub use camera::ViewInsets;
 pub use eight::{EightBall, GameSetup, Mode};
+pub use quality::{Graphics, Quality, Tier};
 pub use settings::{Assists, DevHud, GameCommand, Theme};
-pub use shot::{Aim, MIN_SHOT_POWER};
+pub use shot::{Aim, MIN_SHOT_POWER, ReducedMotion};
 pub use sim::{Ball, Contact, GameEvent, HandRegion, LastShot, Paused, ShotFinished, Simulation};
 
 /// Everything CUE adds to a Bevy [`App`].
@@ -47,6 +52,10 @@ impl Plugin for CuePlugin {
             .init_resource::<Assists>()
             .init_resource::<DevHud>()
             .init_resource::<Mode>()
+            .init_resource::<ViewInsets>()
+            .init_resource::<ReducedMotion>()
+            .init_resource::<Graphics>()
+            .init_resource::<shot::Stroke>()
             .add_message::<Contact>()
             .add_message::<ShotFinished>()
             .add_message::<GameEvent>()
@@ -54,7 +63,7 @@ impl Plugin for CuePlugin {
             .init_resource::<Aim>()
             .add_systems(
                 Startup,
-                (scene::spawn_table, scene::spawn_balls, shot::spawn_cue),
+                (scene::spawn_table, scene::spawn_balls, cue_stick::spawn),
             )
             .add_systems(
                 Update,
@@ -62,10 +71,12 @@ impl Plugin for CuePlugin {
                     eight::apply_commands,
                     shot::apply_commands,
                     shot::read_input,
+                    shot::advance_stroke,
                     eight::suggest_call,
                     sim::advance,
                     sim::after_shot,
                     eight::rule_shots,
+                    scene::orient_racked_balls,
                     sim::sync_balls,
                     shot::draw_aim,
                     camera::fit_to_window,
@@ -73,9 +84,13 @@ impl Plugin for CuePlugin {
                 )
                     .chain(),
             )
+            .add_systems(Update, (quality::apply_commands, quality::watch_frame_rate))
             .add_systems(
                 PostUpdate,
-                settings::apply_theme.run_if(resource_changed::<Theme>),
+                (
+                    settings::apply_theme.run_if(resource_changed::<Theme>),
+                    quality::apply.run_if(resource_changed::<Graphics>),
+                ),
             )
             .add_systems(Startup, (camera::spawn, hud::spawn));
     }

@@ -65,6 +65,7 @@ let live = null;
  * @param {'en'|'es'} [options.locale]  Interface language; defaults to the browser's.
  * @param {'classic'|'studio'|'contrast'} [options.theme]  Overrides the saved theme.
  * @param {'off'|'basic'|'assisted'} [options.assists]  Overrides the saved guide level.
+ * @param {'auto'|'high'|'medium'|'low'} [options.quality]  Overrides the saved graphics quality.
  * @param {{enabled?: boolean, volume?: number}} [options.audio]  Overrides saved sound settings.
  * @param {boolean} [options.persist=true]  Remember preferences in localStorage.
  * @param {() => void} [options.onExit]  Shows an Exit button that calls this.
@@ -87,6 +88,7 @@ export async function createCue(options = {}) {
     ...loadSettings(persist),
     ...(options.theme && { theme: options.theme }),
     ...(options.assists && { assists: options.assists }),
+    ...(options.quality && { quality: options.quality }),
   });
   if (options.audio) {
     settings = sanitize({ ...settings, sound: { ...settings.sound, ...options.audio } });
@@ -139,11 +141,20 @@ export async function createCue(options = {}) {
     emit('fullscreen-change', { fullscreen: on });
   });
 
+  // The visitor's reduced-motion preference turns off the cue's swing.
+  const motionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+  const applyMotion = () => {
+    if (wasm && !destroyed) wasm.setReducedMotion(Boolean(motionQuery?.matches));
+  };
+  motionQuery?.addEventListener?.('change', applyMotion);
+
   const applySettings = () => {
     if (!wasm) return;
     wasm.setTheme(settings.theme);
     wasm.setAssists(settings.assists);
+    wasm.setQuality(settings.quality);
     wasm.setAudio(settings.sound.enabled, settings.sound.volume);
+    applyMotion();
   };
 
   const guard =
@@ -175,6 +186,7 @@ export async function createCue(options = {}) {
     nextRack: guard(() => wasm?.nextRack()),
     stalemate: guard(() => wasm?.stalemate()),
     spotRequest: guard(() => wasm?.spotRequest()),
+    setViewInsets: guard((top, bottom) => wasm?.setViewInsets(Number(top) || 0, Number(bottom) || 0)),
     state: () => (wasm && !destroyed ? wasm.state() : null),
     enterFullscreen: () => fs.enter(),
     exitFullscreen: () => fs.exit(),
@@ -304,8 +316,16 @@ export async function createCue(options = {}) {
     stalemate: api.stalemate,
     /** Eight-ball: spots the legal ball nearest the head string (WPA 1.6). */
     spotRequest: api.spotRequest,
+    /**
+     * CSS pixels at the top and bottom of the canvas covered by the host's own
+     * controls; the cloth is framed clear of them. The built-in controls set
+     * this themselves.
+     */
+    setViewInsets: api.setViewInsets,
     setTheme: guard((theme) => settingsStore.set({ ...settings, theme })),
     setAssists: guard((assists) => settingsStore.set({ ...settings, assists })),
+    /** Graphics quality: 'auto', 'high', 'medium' or 'low'. Never changes the physics. */
+    setQuality: guard((quality) => settingsStore.set({ ...settings, quality })),
     setAudio: guard((audio) =>
       settingsStore.set({ ...settings, sound: { ...settings.sound, ...audio } }),
     ),
@@ -330,6 +350,7 @@ export async function createCue(options = {}) {
         const finish = () => {
           clearTimeout(timer);
           wasm.setListener(null);
+          motionQuery?.removeEventListener?.('change', applyMotion);
           fs.exit();
           fs.dispose();
           overlay?.destroy();

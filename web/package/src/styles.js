@@ -821,6 +821,17 @@ input[type='text']::placeholder { color: rgba(255, 255, 255, 0.35); }
   .power { flex: 1; min-width: 0; }
   .power input[type='range'] { width: 100%; min-width: 48px; }
   .power output { min-width: 2.6em; font-size: 12px; }
+  /* The turn line drops its box: the top bar stays short, so the camera
+     can keep the table large. */
+  .board .line {
+    background: none;
+    border: 0;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    padding: 0 4px;
+    font-size: 12px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  }
   /* The call gets a row of its own above the cue controls. */
   .dock { flex-wrap: wrap; }
   .call { order: -1; flex: 1 1 auto; margin-right: 0; }

@@ -10,7 +10,7 @@ use cue_core::{
     rules::eight_ball::{Call, Choice},
 };
 
-use crate::eight::GameSetup;
+use crate::{camera::ViewInsets, eight::GameSetup, quality::Quality};
 
 /// How much the aiming guide shows. Every level is an *estimate*: it ignores
 /// spin, throw and curve (spec §10.5).
@@ -157,6 +157,13 @@ pub enum GameCommand {
     SetAssists(Assists),
     /// Show or hide the developer overlay.
     ToggleDevHud,
+    /// The canvas bands the host's controls cover; the table is framed
+    /// clear of them.
+    SetViewInsets(ViewInsets),
+    /// Reduce motion: the cue strikes without a swing.
+    SetReducedMotion(bool),
+    /// Change the graphics quality.
+    SetQuality(Quality),
     /// Start a game of eight-ball.
     NewGame(GameSetup),
     /// Go back to free play.
