@@ -46,8 +46,16 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: wasm-bindgen@0.2.129
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Wrapper tests
+        run: node --test 'web/package/test/*.test.mjs'
       - name: Build web/dist
         run: scripts/build-web.sh
+      # The npm tarball, installed into a fresh Vite app and built (spec §17.2, §26.2).
+      - name: Clean consumer
+        run: scripts/consumer-test.sh
       - uses: actions/upload-artifact@v4
         with:
           name: cue-web-dist

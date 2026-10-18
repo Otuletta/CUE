@@ -1,6 +1,6 @@
-// CUE web wrapper: the only API host pages use.
+// CUE web wrapper: the only API host pages use. Reference: docs/api.md.
 //
-//   import { createCue } from './package/index.js';
+//   import { createCue } from '@tuletta/cue';
 //   const game = await createCue({ container: document.querySelector('#cue') });
 //   const off = game.on('shot-end', (shot) => { ... });
 //   game.pause(); game.resume(); game.undo(); game.rerack();
@@ -11,6 +11,10 @@
 // plus an optional accessible control layer in a shadow root) and nothing
 // else: no global styles, no listeners outside that root, no network requests
 // beyond its own module, binary and manifest.
+//
+// Its own files are referenced with static `import()` and
+// `new URL(…, import.meta.url)` expressions, so bundlers such as Vite find,
+// copy and fingerprint them without configuration.
 
 import { resolveLocale, strings } from './i18n.js';
 import {
@@ -53,6 +57,7 @@ const EVENTS = new Set([
 ]);
 
 const RULESETS = new Set(['eight-ball-wpa', 'eight-ball-casual']);
+const MODES = new Set(['free-play', 'eight-ball-local']);
 
 let live = null;
 
@@ -71,7 +76,12 @@ let live = null;
  * @param {() => void} [options.onExit]  Shows an Exit button that calls this.
  * @param {string} [options.fallbackUrl]  Link offered when the browser is unsupported.
  * @param {string} [options.rulesUrl]  Link to the eight-ball rules notes, shown in the match setup.
- * @param {string|URL} [options.moduleUrl]  wasm-bindgen module; defaults to `./pkg/cue_web.js`.
+ * @param {'free-play'|'eight-ball-local'} [options.mode='free-play']  The game to start with.
+ * @param {object} [options.match]  Setup for `mode: 'eight-ball-local'`, as for `newGame`.
+ * @param {{reducedMotion?: boolean, highContrast?: boolean}} [options.accessibility]
+ *   `reducedMotion` overrides the device setting; `highContrast` picks the contrast theme.
+ * @param {string|URL} [options.assetBase]  Where `manifest.json` and `pkg/` are served, when
+ *   not next to this module (a CDN, or a copy in the host's public folder).
  * @returns {Promise<object>} Resolves once the first frame has run.
  */
 export async function createCue(options = {}) {
@@ -84,12 +94,17 @@ export async function createCue(options = {}) {
 
   const locale = resolveLocale(options.locale);
   const t = strings(locale);
+  const access = options.accessibility ?? {};
   let settings = sanitize({
     ...loadSettings(persist),
+    ...(access.highContrast && { theme: 'contrast' }),
     ...(options.theme && { theme: options.theme }),
     ...(options.assists && { assists: options.assists }),
     ...(options.quality && { quality: options.quality }),
   });
+  if (options.mode && !MODES.has(options.mode)) {
+    throw new TypeError(`createCue: unknown mode "${options.mode}"`);
+  }
   if (options.audio) {
     settings = sanitize({ ...settings, sound: { ...settings.sound, ...options.audio } });
   }
@@ -141,10 +156,12 @@ export async function createCue(options = {}) {
     emit('fullscreen-change', { fullscreen: on });
   });
 
-  // The visitor's reduced-motion preference turns off the cue's swing.
+  // The visitor's reduced-motion preference turns off the cue's swing,
+  // unless the host decides.
   const motionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
   const applyMotion = () => {
-    if (wasm && !destroyed) wasm.setReducedMotion(Boolean(motionQuery?.matches));
+    const reduced = access.reducedMotion ?? Boolean(motionQuery?.matches);
+    if (wasm && !destroyed) wasm.setReducedMotion(reduced);
   };
   motionQuery?.addEventListener?.('change', applyMotion);
 
@@ -221,7 +238,7 @@ export async function createCue(options = {}) {
   }
 
   const fail = (kind, error) => {
-    overlay?.showMessage(kind);
+    overlay?.showMessage(error.message === 'RELOAD_REQUIRED' ? 'reload' : kind);
     live = null;
     emit('error', { code: error.message });
     return error;
@@ -233,12 +250,15 @@ export async function createCue(options = {}) {
 
   // Load the module, then stream the binary with honest progress.
   try {
-    const moduleUrl = options.moduleUrl ?? new URL('./pkg/cue_web.js', import.meta.url);
+    const base = options.assetBase ? new URL(String(options.assetBase), document.baseURI) : null;
+    const wasmUrl = base ? new URL('pkg/cue_web_bg.wasm', base) : new URL('./pkg/cue_web_bg.wasm', import.meta.url);
     const [module, manifest] = await Promise.all([
-      import(/* @vite-ignore */ String(moduleUrl)),
-      fetchManifest(),
+      base ? import(/* @vite-ignore */ new URL('pkg/cue_web.js', base).href) : import('./pkg/cue_web.js'),
+      (base ? import(/* @vite-ignore */ new URL('manifest.js', base).href) : import('./manifest.js')).then(
+        (m) => m.default,
+        () => null,
+      ),
     ]);
-    const wasmUrl = new URL(manifest?.wasm?.file ?? 'cue_web_bg.wasm', new URL('./pkg/', import.meta.url));
     const response = await fetch(wasmUrl);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     await module.default({
@@ -273,9 +293,39 @@ export async function createCue(options = {}) {
   root.addEventListener('pointerdown', unlock, true);
   root.addEventListener('keydown', unlock, true);
 
+  const setMode = guard((mode, match = {}) => {
+    if (mode === 'free-play') api.freePlay();
+    else if (mode === 'eight-ball-local') api.newGame(match);
+    else throw new TypeError(`setMode: unknown mode "${mode}"`);
+  });
+
   const instance = {
     /** Build version reported by the engine. */
     version: wasm.version(),
+    /**
+     * Resolves once the game runs. `createCue` already starts it, so this
+     * only resumes a paused instance; it never creates a second one.
+     */
+    start: guard(async () => {
+      if (api.state()?.paused) api.resume();
+    }),
+    /** Starts free play, or a local eight-ball match with a `newGame` setup. */
+    setMode,
+    /**
+     * Moves the game into another container, for single-page apps that
+     * re-create the element CUE lives in. The instance, its state and its GPU
+     * surface carry over: pair with `pause()` when hiding and `resume()` after.
+     */
+    attach: guard((next) => {
+      if (!(next instanceof HTMLElement)) throw new TypeError('attach: `container` must be an HTMLElement');
+      if (root.parentElement !== next) next.appendChild(root);
+      overlay?.remeasure();
+    }),
+    /**
+     * Re-measures the layout. The canvas follows its container on its own;
+     * call this after moving or restyling it in ways a resize does not cover.
+     */
+    resize: guard(() => overlay?.remeasure()),
     /** Subscribes to an event; returns a function that unsubscribes. */
     on(name, handler) {
       const set = listeners.get(name);
@@ -371,6 +421,7 @@ export async function createCue(options = {}) {
   live = instance;
   await ready;
   overlay?.setState('ready');
+  if (options.mode === 'eight-ball-local') api.newGame(options.match ?? {});
   if (ui && !tutorialSeen(persist)) overlay.showTutorial();
   return instance;
 }
@@ -383,15 +434,6 @@ function hasWebGL2() {
     return !!gl;
   } catch {
     return false;
-  }
-}
-
-async function fetchManifest() {
-  try {
-    const res = await fetch(new URL('./manifest.json', import.meta.url));
-    return res.ok ? await res.json() : null;
-  } catch {
-    return null;
   }
 }
 
