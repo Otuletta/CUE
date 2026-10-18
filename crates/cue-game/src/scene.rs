@@ -7,6 +7,8 @@
 
 use bevy::{
     asset::RenderAssetUsages,
+    light::CascadeShadowConfigBuilder,
+    math::Affine2,
     mesh::{Indices, PrimitiveTopology},
     prelude::*,
 };
@@ -16,7 +18,8 @@ use cue_physics::Cushion;
 use crate::{
     ball_texture,
     settings::{TableMaterials, Theme},
-    sim::{Ball, Simulation},
+    sim::{Ball, GameEvent, Simulation},
+    textures,
 };
 
 /// Width of the wooden rail outside the cushion, metres.
@@ -27,6 +30,16 @@ const CUSHION_HEIGHT: f32 = 0.044;
 const RAIL_HEIGHT: f32 = 0.05;
 /// Height of the pocket surround (the leather around the hole), metres.
 const POCKET_HEIGHT: f32 = 0.02;
+/// One repeat of the cloth grain, metres.
+const GRAIN_TILE: f32 = 0.25;
+/// Half-diagonals of a diamond sight, across and along its rail, metres.
+const DIAMOND: (f32, f32) = (0.009, 0.005);
+/// Radius of the foot-spot mark, metres.
+const SPOT_RADIUS: f32 = 0.006;
+/// Farthest distance from the camera that receives shadows, metres. Bevy's
+/// default spreads WebGL2's single shadow cascade over 150 m, too coarse for
+/// a ball's shadow; the camera is never farther than a few metres away.
+const SHADOW_DISTANCE: f32 = 7.0;
 
 fn flat(p: DVec2) -> Vec2 {
     p.as_vec2()
@@ -37,6 +50,7 @@ pub(crate) fn spawn_table(
     sim: Res<Simulation>,
     theme: Res<Theme>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let geometry = sim.world.geometry();
@@ -53,7 +67,18 @@ pub(crate) fn spawn_table(
             ..default()
         })
     };
-    let cloth = material(&mut materials, palette.cloth, 0.92);
+    // The cloth's grain repeats every 25 cm, square on both axes.
+    let cloth = materials.add(StandardMaterial {
+        base_color: palette.cloth,
+        base_color_texture: Some(images.add(textures::cloth_grain())),
+        uv_transform: Affine2::from_scale(Vec2::new(
+            2.0 * outer.x / GRAIN_TILE,
+            2.0 * outer.y / GRAIN_TILE,
+        )),
+        perceptual_roughness: 0.92,
+        reflectance: 0.25,
+        ..default()
+    });
     let cushion = material(&mut materials, palette.cushion, 0.9);
     let wood = material(&mut materials, palette.wood, 0.45);
     let leather = material(&mut materials, palette.leather, 0.7);
@@ -66,6 +91,17 @@ pub(crate) fn spawn_table(
     let hole = materials.add(StandardMaterial {
         base_color: Color::BLACK,
         unlit: true,
+        ..default()
+    });
+    let pearl = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.92, 0.91, 0.86),
+        perceptual_roughness: 0.25,
+        reflectance: 0.5,
+        ..default()
+    });
+    let chalk = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.86, 0.86, 0.82),
+        perceptual_roughness: 0.95,
         ..default()
     });
 
@@ -142,13 +178,66 @@ pub(crate) fn spawn_table(
         );
     }
 
-    // A soft key light from above, as over a real table.
+    // Diamond sights on the rail tops, at eighths of the length and quarters
+    // of the width measured nose to nose (WPA 2.1); none at the side pockets.
+    let table = sim.table();
+    let half = table.half_extents().as_vec2();
+    let band = |inner: f32| inner + RAIL_WIDTH * 0.5;
+    let mut sights = Vec::new();
+    for k in [1, 2, 3, 5, 6, 7] {
+        let x = -half.x + k as f32 * half.x / 4.0;
+        for z in [-band(outer.y), band(outer.y)] {
+            sights.push((Vec2::new(x, z), Vec2::Y));
+        }
+    }
+    for k in [1, 2, 3] {
+        let z = -half.y + k as f32 * half.y / 2.0;
+        for x in [-band(outer.x), band(outer.x)] {
+            sights.push((Vec2::new(x, z), Vec2::X));
+        }
+    }
+    for (at, across) in sights {
+        let along = across.perp();
+        let outline = [
+            at + across * DIAMOND.0,
+            at + along * DIAMOND.1,
+            at - across * DIAMOND.0,
+            at - along * DIAMOND.1,
+        ];
+        spawn(
+            prism(&outline, RAIL_HEIGHT, RAIL_HEIGHT + 0.0006),
+            &pearl,
+            Vec3::ZERO,
+        );
+    }
+
+    // The foot spot is marked: the rack's apex and spotted balls go there.
+    let foot = table.foot_spot().as_vec2();
+    spawn(
+        Cylinder::new(SPOT_RADIUS, 0.0004)
+            .mesh()
+            .resolution(24)
+            .build(),
+        &chalk,
+        Vec3::new(foot.x, 0.0002, foot.y),
+    );
+
+    // A soft key light from above, as over a real table, with its shadow
+    // cascade fitted to the table rather than to a landscape.
     commands.spawn((
         DirectionalLight {
             illuminance: 9_000.0,
             shadow_maps_enabled: true,
             ..default()
         },
+        CascadeShadowConfigBuilder {
+            num_cascades: 1,
+            minimum_distance: 0.1,
+            maximum_distance: SHADOW_DISTANCE,
+            first_cascade_far_bound: SHADOW_DISTANCE,
+            overlap_proportion: 0.2,
+        }
+        .build(),
         Transform::from_xyz(0.4, 4.0, 1.2).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 }
@@ -219,8 +308,35 @@ pub(crate) fn spawn_balls(
                 reflectance: 0.6,
                 ..default()
             })),
-            Transform::from_translation(state.position.as_vec3()),
+            Transform::from_translation(state.position.as_vec3())
+                .with_rotation(ball_texture::resting_orientation(rack_yaw(id))),
             Visibility::Inherited,
         ));
+    }
+}
+
+/// A small, fixed twist per ball, so a fresh rack looks set by hand rather
+/// than printed: within ±0.35 rad, spread by the golden angle.
+fn rack_yaw(id: BallId) -> f32 {
+    ((f32::from(id.number()) * 0.618_034).fract() - 0.5) * 0.7
+}
+
+/// Shows the numbers from above whenever balls are racked or spotted. Once
+/// they roll, their orientation follows the simulation's spin.
+pub(crate) fn orient_racked_balls(
+    mut events: MessageReader<GameEvent>,
+    mut balls: Query<(&Ball, &mut Transform)>,
+) {
+    for event in events.read() {
+        let only = match event {
+            GameEvent::Racked { .. } | GameEvent::NewGame => None,
+            GameEvent::Spotted { ball } => Some(*ball),
+            _ => continue,
+        };
+        for (ball, mut transform) in &mut balls {
+            if only.is_none_or(|b| b == ball.0) {
+                transform.rotation = ball_texture::resting_orientation(rack_yaw(ball.0));
+            }
+        }
     }
 }

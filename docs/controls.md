@@ -96,6 +96,17 @@ rack, or a race to 3 or 5) and who breaks. The rules are explained in
   player breaks.
 - There is no undo in a match. **New game** offers a new match or free play.
 
+## The stroke
+
+Shooting fixes the shot: its direction, power, spin and, in eight-ball, the
+call. The cue then swings in from where it was drawn back, and the ball is
+struck as the tip meets it. A hard shot swings in about 50 ms, a soft one up
+to 300 ms, and the stick follows through a few centimetres. Nothing can
+change the shot during the swing.
+
+If the device asks for reduced motion (`prefers-reduced-motion`), there is
+no swing: the ball is struck at once.
+
 ## Aiming guide
 
 Settings → Aiming guide:
@@ -108,3 +119,15 @@ Settings → Aiming guide:
 
 The guide is an estimate. It ignores spin, throw, squirt and curve, and says
 so in the settings.
+
+## Graphics
+
+Settings → Graphics:
+
+- **Auto** (the default) starts at High and steps down if the game keeps
+  running slowly.
+- **High** has anti-aliasing and fine shadows.
+- **Medium** has anti-aliasing and coarser shadows.
+- **Low** has neither.
+
+Graphics never change how the balls move.

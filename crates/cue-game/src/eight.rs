@@ -87,7 +87,7 @@ pub struct EightBall {
 }
 
 impl EightBall {
-    fn new(setup: &GameSetup, coin: bool) -> Self {
+    pub(crate) fn new(setup: &GameSetup, coin: bool) -> Self {
         let breaker = setup
             .breaker
             .unwrap_or(if coin { Seat::A } else { Seat::B });
@@ -291,6 +291,13 @@ pub(crate) fn pocket_for(sim: &Simulation, ghost: DVec2, object: DVec2) -> Optio
         .map(|(id, _)| id)
 }
 
+/// Starts a match in `mode` without the Bevy plumbing, for other modules'
+/// tests.
+#[cfg(test)]
+pub(crate) fn start_for_tests(mode: &mut Mode, setup: &GameSetup) {
+    *mode = Mode::EightBall(Box::new(EightBall::new(setup, true)));
+}
+
 /// Applies eight-ball commands. Unlike shots, these work while paused: they
 /// set up the table rather than let time pass.
 pub(crate) fn apply_commands(
@@ -298,6 +305,7 @@ pub(crate) fn apply_commands(
     mut mode: ResMut<Mode>,
     mut sim: ResMut<Simulation>,
     time: Res<Time>,
+    stroke: Res<crate::shot::Stroke>,
     mut events: MessageWriter<GameEvent>,
 ) {
     for command in commands.read() {
@@ -315,7 +323,7 @@ pub(crate) fn apply_commands(
                 events.write(GameEvent::NewGame);
             }
             // The rest only means something between eight-ball shots.
-            (_, Mode::EightBall(_)) if !sim.world.is_at_rest() => {}
+            (_, Mode::EightBall(_)) if !sim.world.is_at_rest() || stroke.swinging() => {}
             (GameCommand::SetCall(call), Mode::EightBall(session)) => {
                 match session.game.validate_call(*call) {
                     Ok(()) => {

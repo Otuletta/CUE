@@ -39,17 +39,18 @@ use bevy::{
     prelude::*,
     winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent},
 };
+use cue_audio::Sound;
 use cue_core::{
     BallId, PocketId, ShotReport,
     glam::DVec2,
     rules::{
         Ruleset, Seat,
-        eight_ball::{Call, Choice},
+        eight_ball::{Call, Choice, Next},
     },
 };
 use cue_game::{
-    Aim, Assists, Contact, CuePlugin, GameCommand, GameEvent, GameSetup, HandRegion, LastShot,
-    MIN_SHOT_POWER, Mode, Paused, ShotFinished, Simulation, Theme,
+    Aim, Assists, Contact, CuePlugin, GameCommand, GameEvent, GameSetup, Graphics, HandRegion,
+    LastShot, MIN_SHOT_POWER, Mode, Paused, Quality, ShotFinished, Simulation, Theme, ViewInsets,
 };
 use wasm_bindgen::prelude::*;
 
@@ -84,6 +85,8 @@ struct Snapshot {
     paused: bool,
     theme: &'static str,
     assists: &'static str,
+    quality: &'static str,
+    graphics: &'static str,
     shots: u32,
     balls_in_play: Vec<u8>,
     eight_ball: Option<MatchSnapshot>,
@@ -336,6 +339,39 @@ pub fn set_assists(name: &str) -> Result<(), JsError> {
     game(GameCommand::SetAssists(assists))
 }
 
+/// Tells the engine how many CSS pixels at the top and bottom of the canvas
+/// the host's controls cover. The cloth is framed clear of them; only the
+/// rails may run underneath.
+#[wasm_bindgen(js_name = setViewInsets)]
+pub fn set_view_insets(top: f64, bottom: f64) -> Result<(), JsError> {
+    let clean = |v: f64| {
+        if v.is_finite() {
+            v.max(0.0) as f32
+        } else {
+            0.0
+        }
+    };
+    game(GameCommand::SetViewInsets(ViewInsets {
+        top: clean(top),
+        bottom: clean(bottom),
+    }))
+}
+
+/// Sets the graphics quality: `auto`, `high`, `medium` or `low`. Quality
+/// changes anti-aliasing and shadows, never the simulation.
+#[wasm_bindgen(js_name = setQuality)]
+pub fn set_quality(name: &str) -> Result<(), JsError> {
+    let quality = Quality::parse(name).ok_or_else(|| JsError::new("UNKNOWN_QUALITY"))?;
+    game(GameCommand::SetQuality(quality))
+}
+
+/// Reduced motion: when on, the cue strikes without its short swing. The
+/// wrapper follows the visitor's `prefers-reduced-motion` setting.
+#[wasm_bindgen(js_name = setReducedMotion)]
+pub fn set_reduced_motion(on: bool) -> Result<(), JsError> {
+    game(GameCommand::SetReducedMotion(on))
+}
+
 /// Shows or hides the developer overlay.
 #[wasm_bindgen(js_name = toggleDevOverlay)]
 pub fn toggle_dev_overlay() -> Result<(), JsError> {
@@ -372,7 +408,9 @@ pub fn frame_count() -> u32 {
 
 /// The engine's state as of its last frame, as a plain object:
 /// `{ mode, power, tipX, tipY, atRest, inHand, handRegion, canUndo, paused,
-/// theme, assists, shots, ballsInPlay, minPower, eightBall }`. `mode` is
+/// theme, assists, quality, graphics, shots, ballsInPlay, minPower,
+/// eightBall }`. `quality` is the setting and `graphics` the tier it renders
+/// (`high`, `medium` or `low`). `mode` is
 /// `free-play` or `eight-ball`; `eightBall` is the match (players, score,
 /// shooter, stage, call, decision…) or `null`. `null` before the first frame.
 #[wasm_bindgen]
@@ -404,6 +442,8 @@ pub fn state() -> JsValue {
         ("paused", s.paused.into()),
         ("theme", s.theme.into()),
         ("assists", s.assists.into()),
+        ("quality", s.quality.into()),
+        ("graphics", s.graphics.into()),
         ("shots", s.shots.into()),
         ("ballsInPlay", balls.into()),
         ("minPower", MIN_SHOT_POWER.into()),
@@ -585,6 +625,17 @@ fn emit_events(
                 if let Some(session) = mode.eight_ball()
                     && let Some(ruling) = &session.last
                 {
+                    // One cue per ruling: the end of a rack outranks a foul,
+                    // which outranks a plain change of turn.
+                    let cue = match &ruling.next {
+                        Next::Over(_) => Some(Sound::Win),
+                        _ if !ruling.fouls.is_empty() => Some(Sound::Foul),
+                        Next::Pass { .. } | Next::Decide(_) => Some(Sound::Turn),
+                        Next::Continue => None,
+                    };
+                    if let Some(cue) = cue {
+                        audio::play_cue(cue);
+                    }
                     for (name, detail) in eight::ruling_events(session, ruling, session.last_call) {
                         emit(name, &detail);
                     }
@@ -607,6 +658,7 @@ fn emit_events(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn publish_state(
     sim: Res<Simulation>,
     aim: Res<Aim>,
@@ -614,6 +666,7 @@ fn publish_state(
     paused: Res<Paused>,
     theme: Res<Theme>,
     assists: Res<Assists>,
+    graphics: Res<Graphics>,
     last: Res<LastShot>,
 ) {
     let snapshot = Snapshot {
@@ -626,6 +679,8 @@ fn publish_state(
         paused: paused.0,
         theme: theme.name(),
         assists: assists.name(),
+        quality: graphics.setting.name(),
+        graphics: graphics.tier.name(),
         shots: last.0.as_ref().map_or(0, |r| r.shot_id),
         balls_in_play: sim.world.balls_in_play().map(|b| b.number()).collect(),
         eight_ball: mode

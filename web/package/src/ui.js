@@ -158,6 +158,30 @@ export function createOverlay(root, deps) {
     focusTable: () => canvas()?.focus({ preventScroll: true }),
   });
 
+  // --- Framing ------------------------------------------------------------
+  // The engine keeps the cloth clear of the top bar and the dock; only the
+  // rails run underneath. Re-measured whenever either changes size.
+  let insets = null;
+  let measuring = 0;
+  function measureInsets() {
+    measuring = 0;
+    const box = ui.getBoundingClientRect();
+    if (!box.height || ui.dataset.state !== 'ready') return;
+    const top = $('.top').getBoundingClientRect().bottom - box.top;
+    const dock = $('.dock').getBoundingClientRect();
+    // A panel hides the dock: keep its last size so the table stays put.
+    const bottom = dock.height ? box.bottom - dock.top : (insets?.bottom ?? 0);
+    const next = { top: Math.max(0, Math.round(top)), bottom: Math.max(0, Math.round(bottom)) };
+    if (insets && next.top === insets.top && next.bottom === insets.bottom) return;
+    insets = next;
+    api.setViewInsets(next.top, next.bottom);
+  }
+  const scheduleInsets = () => {
+    if (!measuring) measuring = requestAnimationFrame(measureInsets);
+  };
+  const insetObserver = new ResizeObserver(scheduleInsets);
+  [ui, $('.top'), $('.dock')].forEach((el) => insetObserver.observe(el));
+
   const actions = {
     ...match.actions,
     help: () => open('help'),
@@ -275,6 +299,7 @@ export function createOverlay(root, deps) {
     const s = settings.get();
     for (const input of shadow.querySelectorAll('input[name="theme"]')) input.checked = input.value === s.theme;
     for (const input of shadow.querySelectorAll('input[name="assists"]')) input.checked = input.value === s.assists;
+    for (const input of shadow.querySelectorAll('input[name="quality"]')) input.checked = input.value === s.quality;
     $('input[name="sound"]').checked = s.sound.enabled;
     $('input[name="volume"]').value = String(Math.round(s.sound.volume * 100));
     ui.dataset.theme = s.theme;
@@ -292,6 +317,7 @@ export function createOverlay(root, deps) {
     const s = settings.get();
     if (input.name === 'theme') settings.set({ ...s, theme: input.value });
     if (input.name === 'assists') settings.set({ ...s, assists: input.value });
+    if (input.name === 'quality') settings.set({ ...s, quality: input.value });
     if (input.name === 'sound') settings.set({ ...s, sound: { ...s.sound, enabled: input.checked } });
     if (input.name === 'volume') settings.set({ ...s, sound: { ...s.sound, volume: Number(input.value) / 100 } });
     ui.dataset.theme = settings.get().theme;
@@ -347,7 +373,11 @@ export function createOverlay(root, deps) {
     setState(state) {
       ui.dataset.state = state;
       $('[data-sheet="loading"]').hidden = state !== 'loading';
-      if (state === 'ready' && !raf) loop();
+      if (state === 'ready') {
+        insets = null;
+        scheduleInsets();
+        if (!raf) loop();
+      }
     },
     setProgress(fraction) {
       const bar = $('.progress');
@@ -413,6 +443,8 @@ export function createOverlay(root, deps) {
       cancelAnimationFrame(raf);
       clearTimeout(toastTimer);
       root.removeEventListener('keydown', onKey);
+      insetObserver.disconnect();
+      cancelAnimationFrame(measuring);
       match.destroy();
       host.remove();
     },
@@ -496,6 +528,8 @@ function markup(t, { exit, locale, rulesUrl }) {
       <fieldset><legend>${escape(t.theme)}</legend><div class="choices">${radios('theme', t.themes)}</div></fieldset>
       <fieldset><legend>${escape(t.assists)}</legend><div class="choices">${radios('assists', t.assistsLevels)}</div>
         <p class="note">${escape(t.assistsNote)}</p></fieldset>
+      <fieldset><legend>${escape(t.quality)}</legend><div class="choices">${radios('quality', t.qualityLevels)}</div>
+        <p class="note" data-note="quality">${escape(t.qualityNote)}</p></fieldset>
       <div class="row"><label><input type="checkbox" name="sound"> ${escape(t.soundToggle)}</label></div>
       <div class="row"><label>${escape(t.volume)} <input type="range" name="volume" min="0" max="100" step="5"></label></div>
       <div class="actions">

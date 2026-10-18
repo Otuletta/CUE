@@ -11,11 +11,12 @@ need validation with assistive technology users, which has not happened yet
 |---|---|
 | Operable without a pointer | Full keyboard path: aim, power, spin, shoot, placing the cue ball, undo, pause, settings. The HTML power slider and Shoot button replace the drag gesture. |
 | Real controls with names | Toolbar buttons, a native range input, radio groups and checkboxes, all named and localised (English, Spanish). The spin selector is a focusable `slider` whose `aria-valuetext` describes the tip position ("follow 30 %, left 10 %"). |
+| Sound is never needed | The turn, foul and win sounds repeat what the screen already says. They follow the sound setting. |
 | Feedback without sound | Every shot result appears as text ("Pocketed 3 and 11", "Scratch: the cue ball is back in hand") and is announced through a polite live region. In eight-ball, each ruling is one announced sentence that names the foul, the groups and who plays next. Sound is never the only signal. |
 | Eight-ball without the canvas | Calls are made with native radio groups, offering only legal balls, and a pocket picker whose options are named by screen position ("bottom-right corner"). Decisions and rack results are real buttons in a labelled panel that takes focus when it appears. The scoreboard is text, with visually hidden detail for screen readers ("solids, 5 left", "shooting"). |
 | Focus | Visible focus rings. Dialogs trap focus while open, close with `Esc` and return focus to where it was, or to the table if that control has gone. No keyboard trap: Tab leaves CUE normally when no dialog is open. Typing a player's name never triggers a shortcut. |
 | Colour | Groups differ by pattern (solid or stripe) as well as colour, on the table, in the call dialog and on the scoreboard. The **High contrast** theme uses a mid-grey cloth that separates the black and the white balls equally well, near-black rails, and a thicker yellow guide. |
-| Motion | No camera animation. `prefers-reduced-motion` turns off interface transitions and toasts animate in place. |
+| Motion | No camera animation. `prefers-reduced-motion` turns off interface transitions, makes toasts appear in place, and removes the cue's swing: the ball is struck at once. |
 | Time | Nothing is timed. Balls rolling never require a reaction. |
 | Touch | 44 px targets on coarse pointers. Gestures are captured only on the canvas, never on the host page. |
 | Language | `lang` is set on the control layer; strings follow the browser's language or `createCue({ locale })`. |

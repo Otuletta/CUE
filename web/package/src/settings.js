@@ -7,10 +7,12 @@ const TUTORIAL_KEY = 'cue:v1:tutorial-seen';
 
 export const THEMES = ['classic', 'studio', 'contrast'];
 export const ASSISTS = ['off', 'basic', 'assisted'];
+export const QUALITIES = ['auto', 'high', 'medium', 'low'];
 
 export const DEFAULTS = Object.freeze({
   theme: 'studio',
   assists: 'basic',
+  quality: 'auto',
   sound: Object.freeze({ enabled: true, volume: 0.7 }),
 });
 
@@ -22,6 +24,7 @@ export function sanitize(input, base = DEFAULTS) {
   return {
     theme: THEMES.includes(s.theme) ? s.theme : base.theme,
     assists: ASSISTS.includes(s.assists) ? s.assists : base.assists,
+    quality: QUALITIES.includes(s.quality) ? s.quality : base.quality,
     sound: {
       enabled: typeof sound.enabled === 'boolean' ? sound.enabled : base.sound.enabled,
       volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : base.sound.volume,

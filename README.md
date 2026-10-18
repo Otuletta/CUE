@@ -12,11 +12,11 @@ CUE has two parts that ship together:
 - **A library** that other sites can embed with one call and a container
   element. Embedding it does not require knowing Rust or Bevy.
 
-> **Status: Phase 4, local eight-ball.** Two players on one device, with
-> WPA or casual rules: a rules engine with a test for every rule in scope,
-> called shots, decisions after the break, fouls and ball in hand, and
-> matches with alternating breaks. Free play works as before. This README
-> describes only what exists; see the [roadmap](#roadmap).
+> **Status: Phase 5, visuals and polish.** Numbered balls, a modelled cue
+> with a stroke timed to the strike, table details, a camera that keeps the
+> balls clear of the controls, adaptive graphics quality and game sounds, on
+> top of local eight-ball (Phase 4) and free play. This README describes only
+> what exists; see the [roadmap](#roadmap).
 
 ## What works today
 
@@ -54,7 +54,7 @@ CUE has two parts that ship together:
   aim, drawn on the table and editable in an accessible dialog. Decisions
   and rack results appear in panels that keep the table visible, and every
   ruling is announced in one sentence.
-- **Browser build:** ≈ 4.2 MiB Brotli for the engine plus ≈ 27 KiB for the control layer, eight-ball included (6.8 MiB gzip as GitHub Pages serves it), 120 FPS on the reference desktop,
+- **Browser build:** ≈ 4.2 MiB Brotli for the engine plus ≈ 28 KiB for the control layer, eight-ball included (6.8 MiB gzip as GitHub Pages serves it), 120 FPS on the reference desktop,
   first frame under a second after clicking Play. Pausing stops the engine
   completely (0 frames). See the [measurements](docs/benchmarks/phase-1-web.md).
 - **Accessible controls:** an HTML layer in a shadow root over the canvas
@@ -64,8 +64,25 @@ CUE has two parts that ship together:
 - **Free play:** cue ball in hand at the break and after scratches, one-level
   undo (an exact snapshot, even mid-shot), and automatic re-racking.
 - **Procedural audio:** ball clicks, cushion thumps, pocket drops and cue
-  strikes are synthesised in Rust with modal synthesis. No audio files ship.
-  See [ADR-0009](docs/adr/0009-procedural-audio.md).
+  strikes are synthesised in Rust with modal synthesis, as are three quiet
+  cues for a turn, a foul and a won rack. No audio files ship. See
+  [ADR-0009](docs/adr/0009-procedural-audio.md).
+- **Visual direction with no asset files:**
+  - **Balls:** numbers from a stroke font drawn for CUE, in mip-mapped
+    textures. A fresh rack shows the numbers facing up.
+  - **Cue:** eight sections, from the chalked tip to the bumper. It swings
+    in before the strike lands, or not at all with reduced motion.
+  - **Table:** diamond sights, a marked foot spot, a faint cloth grain, and
+    contact shadows fitted to the table.
+
+  Everything is listed in [docs/assets.md](docs/assets.md); see
+  [ADR-0011](docs/adr/0011-visual-direction-and-graphics-quality.md).
+- **A camera that respects the controls:** the playing surface stays clear
+  of the top bar and the dock. The camera moves off-axis, so aiming is
+  unaffected.
+- **Graphics quality:** Auto, High, Medium and Low change only
+  anti-aliasing and shadows. Auto steps down by itself if the frame rate
+  stays low.
 - **Themes and preferences:** classic, studio and high-contrast themes, plus
   three aiming-guide levels. Settings are validated and kept in `localStorage`
   under `cue:v1:*`.
@@ -75,7 +92,8 @@ CUE has two parts that ship together:
   - eight-ball: `newGame({ ruleset, breaker, raceTo, names })`, `freePlay`,
     `callBall`, `callSafety`, `autoCall`, `decide`, `nextRack`, `stalemate`,
     `spotRequest`;
-  - preferences: `setTheme`, `setAssists`, `setAudio`;
+  - preferences: `setTheme`, `setAssists`, `setQuality`, `setAudio`;
+  - layout: `setViewInsets` for hosts with their own controls;
   - state and display: `getState` (including the match: players, groups,
     score, shooter, stage, call, decision), `enterFullscreen`, `on(event)`.
 
@@ -127,6 +145,7 @@ automatically on first use.
 cargo test --workspace                              # all tests
 cargo test -p cue-physics --release -- --ignored    # 1,000-shot stress test
 cargo run -p cue-game --example sandbox             # play natively
+CUE_STILL=table.png cargo run -p cue-game --example still --release   # render a still, no window
 cargo fmt --all -- --check                          # formatting
 cargo clippy --workspace --all-targets -- -D warnings
 ```
@@ -155,8 +174,8 @@ in [docs/controls.md](docs/controls.md).
 | 1 ✓ | Vertical slice in the browser | A simple table with a controllable shot in WASM, plus real size and FPS measurements |
 | 2 ✓ | Billiards engine | Critical physics cases pass; the solver produces a `ShotReport` |
 | 3 | Free Play (built; [usability test](docs/usability-test.md) in progress) | A first-time visitor can shoot, understand the result, reset and leave |
-| **4** | Local eight-ball (in review) | Every rule transition in scope is covered by tests |
-| 5 | Visuals, audio, polish | Approved on the device matrix with no physics regressions |
+| 4 | Local eight-ball (in review) | Every rule transition in scope is covered by tests |
+| **5** | Visuals, audio, polish (in review) | Approved on the device matrix with no physics regressions |
 | 6 | Open-source 1.0 | An outside developer can embed CUE using only the public docs |
 
 The full product and engineering specification (in Spanish) is in
