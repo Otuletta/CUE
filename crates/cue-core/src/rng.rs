@@ -26,6 +26,24 @@ impl SplitMix64 {
         z ^ (z >> 31)
     }
 
+    /// Uniform `f64` in `[0, 1)`, from the top 53 bits.
+    pub fn unit(&mut self) -> f64 {
+        // 2^53 values, exactly representable: the same on every platform.
+        (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// Uniform point in the unit disc. Rejection sampling keeps it to exact
+    /// arithmetic (no `sin`/`cos`, whose last bit can differ between
+    /// platforms), so a seed gives the same point everywhere.
+    pub fn in_unit_disc(&mut self) -> (f64, f64) {
+        loop {
+            let (x, y) = (2.0 * self.unit() - 1.0, 2.0 * self.unit() - 1.0);
+            if x * x + y * y < 1.0 {
+                return (x, y);
+            }
+        }
+    }
+
     /// Uniform integer in `0..bound`, without modulo bias.
     ///
     /// # Panics

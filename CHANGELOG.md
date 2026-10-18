@@ -9,6 +9,17 @@ the physics profile id, even when no signature changes.
 
 ## [Unreleased]
 
+### Changed: shot outcomes (physics profile `baseline-2`)
+
+- **Breaks open the rack.** Full power is now 12 m/s, a strong real
+  break; it was 8. Racked balls now sit about half a millimetre apart,
+  varied by the rack's seed, instead of frozen. A square full-power break
+  now drives about 6 balls to a rail and pockets one most of the time,
+  where before it drove about 4 and rarely pocketed anything
+  (`docs/physics-model.md`, "The break").
+- The power slider's curve is `p²` instead of `p^1.6`, so soft and medium
+  shots keep their speeds.
+
 ### Added
 
 - **Accessibility checks in the browser tests:**

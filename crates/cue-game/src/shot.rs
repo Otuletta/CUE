@@ -37,8 +37,10 @@ use crate::{
 const FULL_PULL: f64 = 0.45;
 /// Shots below this power are refused, so a stray click never fires.
 pub const MIN_SHOT_POWER: f64 = 0.03;
-/// Perceptual power curve: more resolution for soft shots.
-const POWER_EXPONENT: f64 = 1.6;
+/// Perceptual power curve: more resolution for soft shots. With the
+/// profile's 12 m/s at full power, half power is 3 m/s and a quarter 0.75
+/// m/s, about what they were before full power became a real break.
+const POWER_EXPONENT: f64 = 2.0;
 /// Keyboard aim speed, radians per second (and with `Shift` held).
 const KEY_AIM_SPEED: (f64, f64) = (1.0, 0.08);
 /// Keyboard power change per second.

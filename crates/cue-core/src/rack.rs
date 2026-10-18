@@ -4,12 +4,23 @@ use glam::DVec2;
 
 use crate::{BallGroup, BallId, CoreError, SplitMix64, TableSpec};
 
-/// Clearance left between neighbouring racked balls, in metres.
+/// Clearance between balls that count as frozen (touching), in metres.
 ///
-/// A real rack is frozen (balls touching). The solver needs a strictly
-/// positive gap so that "touching" is never ambiguous at `t = 0`; five microns
-/// is far below anything visible or physically meaningful.
+/// The solver needs a strictly positive gap so that "touching" is never
+/// ambiguous at `t = 0`; five microns is far below anything visible or
+/// physically meaningful. Spotting uses it to freeze a ball to another.
 pub const RACK_GAP: f64 = 5.0e-6;
+
+/// Nominal clearance between neighbouring racked balls, in metres.
+///
+/// A real rack is never perfectly tight: the balls sit a fraction of a
+/// millimetre apart, in a pattern that differs from rack to rack, and that
+/// is what lets a break spread them. A perfectly frozen rack passes the
+/// impulse along its rows like a Newton's cradle: the back balls fly and the
+/// pack barely opens (`docs/physics-model.md`). Half a millimetre is
+/// invisible at table scale. Each ball then moves by up to a third of it,
+/// in a direction drawn from the rack's seed.
+pub const RACK_SPACING: f64 = 0.5e-3;
 
 /// Positions of balls on the table plane, keyed by logical id.
 ///
@@ -68,14 +79,15 @@ const CORNER_SLOTS: [(usize, usize); 2] = [(4, 0), (4, 4)];
 /// The apex sits on the foot spot and the triangle opens towards the foot
 /// rail. The eight ball is centred in the third row, directly below the apex
 /// (WPA 4.2), and the two back corners hold one ball from each group. All
-/// remaining placements are drawn from `seed`, so the same seed always yields
-/// the same rack. The cue ball starts on [`TableSpec::break_spot`], above the
-/// head string.
+/// remaining placements, and the small gaps between balls
+/// ([`RACK_SPACING`]), are drawn from `seed`, so the same seed always yields
+/// the same rack. The apex ball sits exactly on the foot spot. The cue ball
+/// starts on [`TableSpec::break_spot`], above the head string.
 pub fn eight_ball_rack(table: &TableSpec, seed: u64) -> Result<Layout, CoreError> {
     table.validate()?;
 
     let r = table.ball.radius;
-    let pitch = 2.0 * r + RACK_GAP;
+    let pitch = 2.0 * r + RACK_SPACING;
     let row_pitch = pitch * 3f64.sqrt() / 2.0;
     let apex = table.foot_spot();
     let slot_position = |row: usize, i: usize| {
@@ -126,7 +138,14 @@ pub fn eight_ball_rack(table: &TableSpec, seed: u64) -> Result<Layout, CoreError
             } else {
                 rest.next().expect("twelve free slots for twelve balls")
             };
-            layout.insert(ball, slot_position(row, i));
+            // Drawn after the balls are placed, so a seed keeps its order.
+            let nudge = if row == 0 {
+                DVec2::ZERO
+            } else {
+                let (x, y) = rng.in_unit_disc();
+                DVec2::new(x, y) * (RACK_SPACING / 3.0)
+            };
+            layout.insert(ball, slot_position(row, i) + nudge);
         }
     }
     debug_assert!(rest.next().is_none());
@@ -180,9 +199,34 @@ mod tests {
     fn eight_ball_is_centred_in_the_third_row() {
         let (table, layout) = rack(3);
         let eight = position(&layout, 8);
-        let row_pitch = (2.0 * table.ball.radius + RACK_GAP) * 3f64.sqrt() / 2.0;
-        assert_relative_eq!(eight.x, table.foot_spot().x + 2.0 * row_pitch);
-        assert_relative_eq!(eight.y, 0.0);
+        let row_pitch = (2.0 * table.ball.radius + RACK_SPACING) * 3f64.sqrt() / 2.0;
+        let centre = DVec2::new(table.foot_spot().x + 2.0 * row_pitch, 0.0);
+        assert!(eight.distance(centre) <= RACK_SPACING / 3.0 + 1e-12);
+    }
+
+    #[test]
+    fn racked_balls_sit_apart_by_varied_fractions_of_a_millimetre() {
+        let (table, layout) = rack(5);
+        let balls: Vec<_> = layout.iter().filter(|(b, _)| !b.is_cue()).collect();
+        let mut gaps = Vec::new();
+        for (i, (_, pa)) in balls.iter().enumerate() {
+            for (_, pb) in &balls[i + 1..] {
+                let gap = pa.distance(*pb) - table.ball.diameter();
+                if gap < 2.0 * RACK_SPACING {
+                    gaps.push(gap);
+                }
+            }
+        }
+        // Neighbours in a triangle of fifteen: 30 pairs.
+        assert_eq!(gaps.len(), 30);
+        let (min, max) = gaps
+            .iter()
+            .fold((f64::MAX, f64::MIN), |(lo, hi), g| (lo.min(*g), hi.max(*g)));
+        assert!(min > 0.0 && max < 2.0 * RACK_SPACING, "{min} – {max}");
+        assert!(
+            max - min > RACK_SPACING / 4.0,
+            "gaps should vary: {min} – {max}"
+        );
     }
 
     #[test]
@@ -198,7 +242,7 @@ mod tests {
             let back_x = layout.iter().map(|(_, p)| p.x).fold(f64::MIN, f64::max);
             let mut corners: Vec<_> = layout
                 .iter()
-                .filter(|(_, p)| (p.x - back_x).abs() < 1e-9)
+                .filter(|(_, p)| (p.x - back_x).abs() < RACK_SPACING)
                 .collect();
             corners.sort_by(|a, b| a.1.y.total_cmp(&b.1.y));
             let left = corners.first().unwrap().0.group();
@@ -217,7 +261,7 @@ mod tests {
                 prop_assert!(table.contains_ball(*pa), "{a} off the table");
                 for (b, pb) in &balls[i + 1..] {
                     let gap = pa.distance(*pb) - table.ball.diameter();
-                    prop_assert!(gap >= RACK_GAP * 0.999, "{a} and {b} overlap: {gap}");
+                    prop_assert!(gap >= RACK_SPACING / 3.0 * 0.999, "{a} and {b} overlap: {gap}");
                 }
             }
         }

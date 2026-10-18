@@ -63,8 +63,10 @@ pub struct CushionParams {
 /// Cue delivery.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CueParams {
-    /// Cue-ball speed at full power, m/s. A hard amateur break is around
-    /// 7–8 m/s; professionals exceed 10 m/s.
+    /// Cue-ball speed at full power, m/s. A good amateur break is around
+    /// 9 m/s and a professional one 11–13 m/s (Alciatore); full power is a
+    /// strong break, so that breaks open the rack as they do on a real
+    /// table.
     pub max_speed: f64,
     /// Effective mass of the shaft's tip end, kg. It sets **squirt**: the
     /// lighter it is, the less a side-spin shot pushes the cue ball off the
@@ -105,7 +107,7 @@ impl PhysicsProfile {
     /// reference behaviours this profile is checked against.
     pub const fn baseline() -> Self {
         Self {
-            id: "baseline-1",
+            id: "baseline-2",
             table: TableSpec::nine_foot(),
             cloth: ClothParams {
                 sliding_friction: 0.2,
@@ -126,7 +128,7 @@ impl PhysicsProfile {
                 friction: 0.2,
             },
             cue: CueParams {
-                max_speed: 8.0,
+                max_speed: 12.0,
                 shaft_endmass: 0.007,
             },
             gravity: 9.80665,

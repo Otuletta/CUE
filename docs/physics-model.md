@@ -199,7 +199,7 @@ Two facts in the report exist only for the rules:
 
 ## Parameters
 
-`PhysicsProfile::baseline()` is id **`baseline-1`**. Any change to a value
+`PhysicsProfile::baseline()` is id **`baseline-2`**. Any change to a value
 bumps the id, so a change in behaviour is always visible.
 
 | Parameter | Value | Source |
@@ -212,8 +212,36 @@ bumps the id, so a change in behaviour is always visible.
 | Ball–cushion restitution | 0.85 | Common for the Han model |
 | Ball–cushion friction | 0.2 | Common for the Han model |
 | Cushion nose height | 63.5 % of ball diameter | WPA midpoint |
-| Max cue-ball speed | 8 m/s | Hard amateur break |
+| Max cue-ball speed | 12 m/s | A strong break (Alciatore: good amateurs ≈ 9, professionals 11–13) |
 | Shaft endmass | 7 g | Typical shaft |
+
+## The break
+
+`baseline-1` broke poorly: the pack barely opened. Two causes, each
+measured on 20 racks with a full-power break struck square on the apex:
+
+- **The rack was perfectly frozen.** Five microns between balls let the
+  solver pass the impulse along the rows, like a Newton's cradle: the back
+  balls flew and the rest stayed. Real racks are never that tight. The rack
+  now leaves about half a millimetre between neighbours, varied ball by
+  ball from the rack's seed (`RACK_SPACING`). The apex stays exactly on the
+  foot spot.
+- **Full power was too slow.** At 8 m/s, about four balls reached a rail. A
+  strong real break is 10–12 m/s.
+
+| Profile | Balls to a rail | Balls moved > 15 cm | Pocketed | Legal breaks |
+|---|---:|---:|---:|---:|
+| `baseline-1`: 8 m/s, frozen rack | 4.0 | 6.0 | 0.00 | 20/20 (only just) |
+| `baseline-2`: 12 m/s, spaced rack | 5.7 | 8.6 | 0.87 | 20/20 |
+
+A wider spacing (1–2 mm) did not spread the rack further. A hit a few
+millimetres off the apex still loses part of the break, as on a real table.
+`a_full_power_break_opens_the_rack` holds these figures.
+
+The input layer's power curve went from `p^1.6` to `p²`. Soft and medium
+shots keep the speeds they had, while the top of the slider reaches the new
+maximum. Half power is now 3.0 m/s (it was 2.6) and a quarter is 0.75 m/s
+(it was 0.87).
 
 **Calibration status.** The profile is validated against the textbook and
 published behaviours listed above, which the test suite asserts. It has
