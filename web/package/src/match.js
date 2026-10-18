@@ -19,6 +19,8 @@ const SEATS = ['a', 'b'];
 /** Colour classes for a ball: its hue, and whether it is striped. */
 const ballClass = (n) => (n === 8 ? 'eight' : `c${n > 8 ? n - 8 : n}${n > 8 ? ' stripe' : ''}`);
 const other = (seat) => (seat === 'a' ? 'b' : 'a');
+/** Each group's balls, then the eight it must finish on. */
+const GROUP_BALLS = { solids: [1, 2, 3, 4, 5, 6, 7, 8], stripes: [9, 10, 11, 12, 13, 14, 15, 8] };
 
 const escape = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -164,7 +166,7 @@ export function sheetsMarkup(t, { rulesUrl }) {
  *   `open`, `close`, `openSheet`, `announce` and `focusTable`.
  */
 export function createMatch(shadow, deps) {
-  const { t, locale, api, root, open, close, announce } = deps;
+  const { t, locale, api, root, open, close, announce, banner, celebrate } = deps;
   const $ = (selector) => shadow.querySelector(selector);
   const ui = $('.ui');
   const board = $('.board');
@@ -232,10 +234,20 @@ export function createMatch(shadow, deps) {
       const active = m.shooter === p.seat && m.stage !== 'over';
       el.toggleAttribute('data-active', active);
       el.querySelector('.name').textContent = nameOf(m, p.seat);
+      // The player's balls, built once when the group is set; each one
+      // dims, with a little pop, as it goes down.
       const group = el.querySelector('.group');
-      group.innerHTML = p.group
-        ? `<span class="swatch ${p.group}" aria-hidden="true"></span><span class="word">${escape(t.groupTitles[p.group])}</span> <span class="left">${p.remaining}</span><span class="sr">${escape(t.groupLeft(t.groups[p.group], p.remaining))}</span>`
-        : `<span class="sr">${escape(t.noGroup)}</span>`;
+      if (group.dataset.group !== (p.group ?? '')) {
+        group.dataset.group = p.group ?? '';
+        const marks = (GROUP_BALLS[p.group] ?? [])
+          .map((n) => `<span class="mark mini ${ballClass(n)}" data-ball="${n}"></span>`)
+          .join('');
+        group.innerHTML = `${marks ? `<span class="rack-balls" aria-hidden="true">${marks}</span>` : ''}<span class="sr"></span>`;
+      }
+      for (const mark of group.querySelectorAll('[data-ball]')) {
+        mark.toggleAttribute('data-gone', !s.ballsInPlay.includes(Number(mark.dataset.ball)));
+      }
+      group.querySelector('.sr').textContent = p.group ? t.groupLeft(t.groups[p.group], p.remaining) : t.noGroup;
       const score = el.querySelector('.score');
       score.hidden = m.raceTo === 1;
       score.innerHTML = `<span aria-hidden="true">${p.score}</span><span class="sr">${escape(t.racksWon(p.score))}</span>`;
@@ -398,6 +410,27 @@ export function createMatch(shadow, deps) {
 
   // --- Announcements -------------------------------------------------------------
 
+  /** Shows the banner a ruling deserves, a foul, a change of turn or the
+   * win, and says whether there was one. */
+  function bannerFor(r, m) {
+    const next = nameOf(m, other(r.shooter));
+    if (r.next === 'over' && m.outcome) {
+      const winner = nameOf(m, m.outcome.winner);
+      banner('win', m.matchOver ? t.bannerMatch(winner) : t.bannerWin(winner));
+      celebrate();
+    } else if (r.fouls.length) {
+      const list = r.fouls.map((f) => t.fouls[f]?.(r.wrongBall) ?? f);
+      // What the foul was, and who has the cue ball now.
+      const why = formatFouls(list);
+      banner('foul', t.bannerFoul, r.next === 'pass' ? `${why} · ${t.bannerInHand(next)}` : why);
+    } else if (r.next === 'pass') {
+      banner('turn', t.bannerTurn(next));
+    } else {
+      return false;
+    }
+    return true;
+  }
+
   function describeRuling(r, m) {
     const shooter = nameOf(m, r.shooter);
     const next = nameOf(m, other(r.shooter));
@@ -455,13 +488,15 @@ export function createMatch(shadow, deps) {
     switch (name) {
       case 'new-game':
         if (detail?.mode === 'eight-ball' && m) {
-          announce(t.matchStarts(nameOf(m, 'a'), nameOf(m, 'b'), nameOf(m, m.breaker)));
+          // The banner shows it; the live region still says it in full.
+          announce(t.matchStarts(nameOf(m, 'a'), nameOf(m, 'b'), nameOf(m, m.breaker)), { visual: false });
+          banner('turn', t.bannerBreak(nameOf(m, m.breaker)));
         } else {
           announce(t.freePlay);
         }
         return true;
       case 'ruling':
-        if (m) announce(describeRuling(detail, m));
+        if (m) announce(describeRuling(detail, m), { visual: !bannerFor(detail, m) });
         return true;
       case 'decided':
         if (!m || detail.stage === 'break') return true; // `racked` follows.
@@ -478,7 +513,10 @@ export function createMatch(shadow, deps) {
         return true;
       case 'racked':
         if (!m) return false;
-        announce(m.raceTo > 1 ? t.newRackBreaks(m.rack, nameOf(m, m.breaker)) : t.rerackBreaks(nameOf(m, m.breaker)));
+        announce(m.raceTo > 1 ? t.newRackBreaks(m.rack, nameOf(m, m.breaker)) : t.rerackBreaks(nameOf(m, m.breaker)), {
+          visual: false,
+        });
+        banner('turn', t.bannerBreak(nameOf(m, m.breaker)));
         return true;
       case 'shot-refused':
       case 'call-refused':

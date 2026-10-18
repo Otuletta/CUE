@@ -402,6 +402,7 @@ async function mount(options, claim) {
       onExit,
       fallbackUrl,
       rulesUrl,
+      reducedMotion: access.reducedMotion,
       onTutorialDone: () => markTutorialSeen(persist),
     });
     overlay.setState('loading');

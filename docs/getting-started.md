@@ -31,7 +31,7 @@ python3 scripts/serve.py      # → http://127.0.0.1:8765
 ```
 
 The build ends with a size report and fails if a download budget is
-exceeded: 4.6 MiB for the engine and 35 KiB for the control layer, Brotli
+exceeded: 4.6 MiB for the engine and 40 KiB for the control layer, Brotli
 11. `CUE_SIZE_BUDGET=off` reports without failing, for experiments.
 
 ## Test

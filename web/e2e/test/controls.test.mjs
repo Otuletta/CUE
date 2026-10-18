@@ -108,3 +108,52 @@ test('a long dialog keeps its button in view on a small stage', async () => {
   assert.deepEqual(fit, { scrolls: true, inside: true });
   await tab.close();
 });
+
+describe('the power slider', () => {
+  /** Mounts CUE in `#a` at `width` × `height` and returns the slider's box. */
+  async function mountAt(width, height) {
+    const tab = await h.open({ viewport: { width: 1300, height: 900 } });
+    const { page } = tab;
+    await page.evaluate(
+      async ([w, hgt]) => {
+        const a = document.querySelector('#a');
+        a.style.width = `${w}px`;
+        a.style.height = `${hgt}px`;
+        window.game = await window.createCue({ container: a, persist: false, locale: 'en' });
+        window.record(window.game, ['shot-start']);
+      },
+      [width, height],
+    );
+    await page.keyboard.press('Escape');
+    const box = await page.locator('#a .cue-overlay >> input[name="power"]').boundingBox();
+    return { tab, page, box };
+  }
+
+  test('stands at the side of a wide stage: pull it down and let go to shoot', async () => {
+    const { tab, page, box } = await mountAt(1280, 720);
+    assert.ok(box.height > box.width * 4, `a vertical bar, ${box.width} × ${box.height}`);
+    await page.mouse.move(box.x + box.width / 2, box.y + 4);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.6, { steps: 8 });
+    const pulled = await page.evaluate(() => window.game.getState().power);
+    assert.ok(pulled > 0.5, `power ${pulled}`);
+    await page.mouse.up();
+    await page.waitForFunction(() => window.events.some(([e]) => e === 'shot-start'));
+    await tab.close();
+  });
+
+  test('on a narrow stage it only sets the power; Shoot fires', async () => {
+    const { tab, page, box } = await mountAt(400, 640);
+    assert.ok(box.width > box.height, 'a horizontal slider');
+    await page.mouse.move(box.x + 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+    assert.equal(await page.evaluate(() => window.events.length), 0, 'no shot on release');
+    assert.ok((await page.evaluate(() => window.game.getState().power)) > 0.4);
+    await page.click('#a .cue-overlay >> [data-action="shoot"]');
+    await page.waitForFunction(() => window.events.some(([e]) => e === 'shot-start'));
+    await tab.close();
+  });
+});

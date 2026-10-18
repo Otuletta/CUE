@@ -11,7 +11,9 @@ import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 // (docs/benchmarks/), so that growth is a decision rather than an accident.
 const BUDGETS = [
   { name: 'engine (package/pkg/cue_web_bg.wasm)', matches: (p) => p === 'package/pkg/cue_web_bg.wasm', max: 4.6 * 1024 * 1024 },
-  { name: 'control layer (package/*.js)', matches: (p) => /^package\/[^/]+\.js$/.test(p), max: 35 * 1024 },
+  // Raised from 35 KiB for the gameplay pass (banners, fine aim, haptics,
+  // the players' balls): docs/benchmarks/phase-1-web.md.
+  { name: 'control layer (package/*.js)', matches: (p) => /^package\/[^/]+\.js$/.test(p), max: 40 * 1024 },
 ];
 
 const root = process.argv[2] ?? 'web/dist';

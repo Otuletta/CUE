@@ -229,6 +229,34 @@ input[type='range'] {
   touch-action: none;
 }
 
+/* Wide stages: the power slider stands at the side of the table, pulled down
+   for more power and released to shoot. */
+@container (orientation: landscape) and (min-width: 720px) {
+  /* Placed from the dock, which sits 8 px above the stage's bottom: this
+     centres the bar on the stage's height. */
+  .power {
+    position: absolute;
+    left: 2px;
+    bottom: calc(24cqh - 8px);
+    height: 52cqh;
+    width: 48px;
+    padding: 12px 0;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .power span { display: none; }
+  .power input[type='range'] {
+    writing-mode: vertical-lr;
+    width: 28px;
+    height: auto;
+    flex: 1;
+    min-height: 0;
+    cursor: ns-resize;
+  }
+  .power output { min-width: 0; font-size: 12px; text-align: center; }
+}
+
 .shoot {
   height: var(--tap);
   padding: 0 18px;
@@ -520,6 +548,93 @@ input[type='range'] {
 }
 
 .player .score[hidden] { display: none; }
+
+.rack-balls { display: inline-flex; gap: 3px; }
+
+.mark.mini {
+  width: 11px;
+  height: 11px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+  transition: opacity 0.3s, transform 0.3s;
+}
+
+/* A pocketed ball pops, then fades back. */
+.mark.mini[data-gone] {
+  opacity: 0.2;
+  transform: scale(0.72);
+  animation: pocketed 0.55s ease-out;
+}
+
+@keyframes pocketed {
+  0% { opacity: 1; transform: scale(1.6); box-shadow: 0 0 0 3px var(--accent); }
+  100% { opacity: 0.2; transform: scale(0.72); }
+}
+
+/* Banners: a few big words for a turn, a foul or a win. */
+.banner {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 34%;
+  margin-inline: auto;
+  width: fit-content;
+  max-width: calc(100% - 32px);
+  padding: 12px 26px;
+  border-radius: 16px;
+  background: var(--glass-strong);
+  border: 1px solid var(--line);
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.45);
+  text-align: center;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+}
+
+.banner[data-visible] {
+  visibility: visible;
+  opacity: 1;
+  animation: banner-in 0.34s cubic-bezier(0.2, 0.9, 0.25, 1.15);
+}
+
+.banner[data-leaving] { opacity: 0; transform: translateY(6px); transition: opacity 0.35s, transform 0.35s; }
+
+@keyframes banner-in {
+  0% { opacity: 0; transform: translateY(-14px) scale(0.9); }
+  100% { opacity: 1; transform: none; }
+}
+
+.banner strong {
+  display: block;
+  font-size: clamp(18px, 4.2cqw, 28px);
+  font-weight: 750;
+  letter-spacing: 0.01em;
+}
+
+.banner span { display: block; margin-top: 2px; font-size: 13px; color: var(--muted); }
+.banner span[hidden] { display: none; }
+.banner[data-kind='foul'] { border-color: rgba(255, 92, 96, 0.7); }
+.banner[data-kind='foul'] strong { color: #ff6b6f; }
+.banner[data-kind='win'] { border-color: var(--accent); }
+.banner[data-kind='win'] strong { color: var(--accent); }
+
+/* The win: a short burst of confetti over the table. */
+.confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+
+.confetti i {
+  position: absolute;
+  top: -12px;
+  left: var(--x);
+  width: 7px;
+  height: 11px;
+  border-radius: 2px;
+  opacity: 0;
+  animation: confetti 2.4s cubic-bezier(0.25, 0.6, 0.5, 1) var(--delay) forwards;
+}
+
+@keyframes confetti {
+  0% { opacity: 1; transform: translate(0, 0) rotate(0); }
+  100% { opacity: 0; transform: translate(var(--drift), 105cqh) rotate(var(--turn)); }
+}
 
 .swatch {
   width: 11px;
@@ -908,4 +1023,7 @@ input[type='text']::placeholder { color: rgba(255, 255, 255, 0.35); }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* The host asked for reduced motion (\`accessibility.reducedMotion\`). */
+.ui[data-reduced-motion] * { transition: none !important; animation: none !important; }
 `;

@@ -30,7 +30,7 @@ const escape = (s) =>
  * @param {object} deps
  */
 export function createOverlay(root, deps) {
-  const { t, locale, api, settings, onExit, fallbackUrl, rulesUrl } = deps;
+  const { t, locale, api, settings, onExit, fallbackUrl, rulesUrl, reducedMotion } = deps;
   const host = document.createElement('div');
   host.className = 'cue-overlay';
   Object.assign(host.style, { position: 'absolute', inset: '0', pointerEvents: 'none' });
@@ -163,6 +163,52 @@ export function createOverlay(root, deps) {
     api.shoot();
   }
 
+  // --- Banners and celebration ---------------------------------------------
+  // Big, brief and visual only: the live region already says it in full.
+
+  const motionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+  const still = () => reducedMotion ?? Boolean(motionQuery?.matches);
+  if (reducedMotion) ui.dataset.reducedMotion = '';
+  const bannerEl = $('.banner');
+  let bannerTimers = [];
+  function banner(kind, title, sub = '') {
+    bannerTimers.forEach(clearTimeout);
+    bannerEl.dataset.kind = kind;
+    bannerEl.querySelector('strong').textContent = title;
+    bannerEl.querySelector('span').textContent = sub;
+    bannerEl.querySelector('span').hidden = !sub;
+    bannerEl.removeAttribute('data-visible');
+    bannerEl.removeAttribute('data-leaving');
+    void bannerEl.offsetWidth; // restart the entrance
+    bannerEl.setAttribute('data-visible', '');
+    const stay = kind === 'win' ? 2600 : 1500;
+    bannerTimers = [
+      setTimeout(() => bannerEl.setAttribute('data-leaving', ''), stay),
+      setTimeout(() => {
+        bannerEl.removeAttribute('data-visible');
+        bannerEl.removeAttribute('data-leaving');
+      }, stay + 350),
+    ];
+  }
+
+  const confettiEl = $('.confetti');
+  const CONFETTI = ['#f2c12e', '#2c5bd8', '#d22b2b', '#5c2485', '#f57014', '#0f753d', '#ffffff'];
+  function celebrate() {
+    if (still()) return;
+    confettiEl.replaceChildren(
+      ...Array.from({ length: 48 }, (_, i) => {
+        const bit = document.createElement('i');
+        bit.style.setProperty('--x', `${(i * 37) % 100}%`);
+        bit.style.setProperty('--drift', `${((i * 53) % 61) - 30}px`);
+        bit.style.setProperty('--delay', `${(i % 12) * 45}ms`);
+        bit.style.setProperty('--turn', `${(i * 97) % 720}deg`);
+        bit.style.background = CONFETTI[i % CONFETTI.length];
+        return bit;
+      }),
+    );
+    setTimeout(() => confettiEl.replaceChildren(), 3200);
+  }
+
   const match = createMatch(shadow, {
     t,
     locale,
@@ -171,6 +217,8 @@ export function createOverlay(root, deps) {
     open,
     close,
     announce,
+    banner,
+    celebrate,
     openSheet: () => openSheet,
     focusTable: () => canvas()?.focus({ preventScroll: true }),
   });
@@ -253,7 +301,25 @@ export function createOverlay(root, deps) {
   // --- Power and spin -------------------------------------------------------
 
   power.addEventListener('pointerdown', () => (draggingPower = true));
-  power.addEventListener('pointerup', () => (draggingPower = false));
+  // On wide stages the slider stands at the side of the table: pull it down
+  // and let go to shoot, as pool games do. Letting go with almost no power
+  // cancels, as on the table. A horizontal slider (narrow stages) only sets
+  // the power; Shoot fires.
+  const pullToShoot = () => getComputedStyle(power).writingMode.startsWith('vertical');
+  power.addEventListener('pointerup', () => {
+    if (draggingPower && pullToShoot()) {
+      if ((askedPower ?? snapshot?.power ?? 0) >= (snapshot?.minPower ?? 0.03)) shoot();
+      else api.setPower(0);
+    }
+    draggingPower = false;
+  });
+  power.addEventListener('pointercancel', () => (draggingPower = false));
+  power.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      shoot();
+      e.preventDefault();
+    }
+  });
   power.addEventListener('blur', () => (draggingPower = false));
   power.addEventListener('input', () => {
     powerOut.value = `${power.value}%`;
@@ -588,6 +654,8 @@ function markup(t, { exit, locale, rulesUrl }) {
   </div>
 
   <div class="toast" aria-hidden="true"></div>
+  <div class="banner" aria-hidden="true"><strong></strong><span></span></div>
+  <div class="confetti" aria-hidden="true"></div>
   <div class="sr" role="status" aria-live="polite"></div>
 
   <div class="dock">

@@ -132,6 +132,12 @@ describe('a match played through the controls', () => {
       { ruleset: 'eight-ball-wpa', raceTo: 3, breaker: 'a', stage: 'break', names: ['Ana', 'Bo'] },
     );
     assert.equal(await sheet(page), null);
+    // A banner says who breaks; the live region has the full sentence.
+    const banner = await page.evaluate(() => {
+      const el = window.shadow.querySelector('.banner');
+      return { visible: el.hasAttribute('data-visible'), text: el.querySelector('strong').textContent };
+    });
+    assert.deepEqual(banner, { visible: true, text: 'Ana breaks' });
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
     const shown = await board(page);
     assert.deepEqual({ ...shown, turn: undefined }, { shown: true, names: ['Ana', 'Bo'], active: ['a'], turn: undefined });

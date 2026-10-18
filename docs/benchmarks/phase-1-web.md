@@ -70,6 +70,12 @@ Since `1.0.0-beta.2` the build enforces budgets: **4.6 MiB** for the engine
 and **35 KiB** for the control layer, Brotli 11 (`scripts/size-report.mjs`).
 Raising one is a decision, to be recorded here.
 
+- **Control layer 35 → 40 KiB (gameplay pass, after `1.0.0-beta.2`).** The
+  pass added banners and a win celebration, the players' balls in the
+  scoreboard, a fine-aim strip, haptics and fine aiming with `Shift`. That
+  took the layer from 32 to 35.3 KiB. It is about 0.1 % of the engine's
+  download, so the features were worth more than the bytes.
+
 ## Runtime
 
 | Metric | Result |

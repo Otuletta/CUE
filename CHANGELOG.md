@@ -22,6 +22,21 @@ the physics profile id, even when no signature changes.
 
 ### Added
 
+- **Animations:**
+  - a pocketed ball drops into its pocket instead of vanishing;
+  - the cue slides back in when the balls stop;
+  - the ball-in-hand ring breathes;
+  - banners for the break, each change of turn, fouls (with the reason) and
+    wins, and a burst of confetti for the win;
+  - each player's group shows as small balls in the scoreboard, which pop
+    and dim as they are pocketed.
+
+  Reduced motion turns them off.
+- **A fuller aiming guide:** the basic guide also shows a short stretch of
+  the object ball's path and the cue ball's tangent, or the bounce off the
+  first cushion. The assisted guide runs each path to its next contact.
+- **Pull to shoot:** on a wide stage the power slider stands at the side of
+  the table; pull it down and let go to shoot. `Enter` on the slider shoots.
 - **Fine aiming:**
   - with the mouse, hold `Shift` and the aim turns a tenth as much as the
     pointer moves;
@@ -46,6 +61,11 @@ the physics profile id, even when no signature changes.
   - decisions, turns and the call picker;
   - a stalemate;
   - free play's Undo and New rack.
+
+### Changed
+
+- The control layer's download budget is 40 KiB (was 35) for the features
+  above (`docs/benchmarks/phase-1-web.md`).
 
 ### Fixed
 

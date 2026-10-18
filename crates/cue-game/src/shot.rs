@@ -46,6 +46,12 @@ const KEY_AIM_SPEED: (f64, f64) = (1.0, 0.08);
 /// With `Shift` held, the mouse turns the aim by this fraction of how far it
 /// moves round the cue ball: fine aiming.
 const FINE_POINTER: f64 = 0.1;
+/// When the balls stop, the stick slides in from this far back, metres,
+/// over this long, seconds.
+const STICK_ENTRY: (f32, f32) = (0.3, 0.28);
+/// Guide lengths, metres: the object ball's path and the cue ball's, after
+/// contact or a cushion, for the basic and the assisted guide.
+const GUIDE_AFTER: [(f64, f64); 2] = [(0.4, 0.22), (1.2, 0.5)];
 /// Keyboard power change per second.
 const KEY_POWER_SPEED: f64 = 0.6;
 /// Keyboard tip movement per second, in ball radii.
@@ -638,6 +644,9 @@ pub(crate) fn draw_aim(
     assists: Res<Assists>,
     theme: Res<Theme>,
     stroke: Res<Stroke>,
+    (time, motion): (Res<Time>, Res<ReducedMotion>),
+    // How long the stick has been back on the table, while it is.
+    mut shown: Local<Option<f32>>,
     mut gizmos: Gizmos,
     mut stick: Query<(&mut Transform, &mut Visibility), With<CueStick>>,
 ) {
@@ -668,9 +677,15 @@ pub(crate) fn draw_aim(
         .filter(|_| mode.eight_ball().is_none_or(|s| s.accepts_shot()))
     else {
         *visibility = Visibility::Hidden;
+        *shown = None;
         return;
     };
     let palette = theme.palette();
+    let pulse = if motion.0 {
+        0.0
+    } else {
+        (time.elapsed_secs() * 5.0).sin()
+    };
     let r = sim.table().ball.radius;
     let at = |p: DVec2| DVec3::new(p.x, r, p.y).as_vec3();
     let flat = |p: Vec3| Isometry3d::new(p, Quat::from_rotation_arc(Vec3::Z, Vec3::Y));
@@ -702,13 +717,28 @@ pub(crate) fn draw_aim(
             Some(Gesture::Place { valid: false, .. }) => Color::srgb(1.0, 0.25, 0.25),
             _ => palette.guide,
         };
-        gizmos.circle(flat(centre), (1.45 * r) as f32, colour);
+        // It breathes, so the eye finds it.
+        gizmos.circle(
+            flat(centre),
+            (1.45 * r) as f32 * (1.0 + 0.07 * pulse),
+            colour,
+        );
     }
     if aim.placing() {
         *visibility = Visibility::Hidden;
+        *shown = None;
         return;
     }
     *visibility = Visibility::Inherited;
+    let since = shown.map_or(0.0, |t| t + time.delta_secs());
+    *shown = Some(since);
+    // The stick slides back in when the balls stop, easing to a halt.
+    let entry = if motion.0 {
+        0.0
+    } else {
+        let t = (since / STICK_ENTRY.1).clamp(0.0, 1.0);
+        STICK_ENTRY.0 * (1.0 - t) * (1.0 - t)
+    };
 
     // Stick: drawn back with power, or swinging in with a quadratic ease, so
     // it is fastest as it meets the ball.
@@ -722,7 +752,7 @@ pub(crate) fn draw_aim(
             let t = (elapsed / duration).clamp(0.0, 1.0);
             from * (1.0 - t * t)
         }
-        _ => drawback(aim.power),
+        _ => drawback(aim.power) + entry,
     };
     let (tip, axis) = cue_pose(centre, r as f32, &aim, gap);
     place_stick(tip, axis);
@@ -731,18 +761,36 @@ pub(crate) fn draw_aim(
         return;
     }
     // Guide: line to the first ball or cushion, and a ghost ball there.
-    let Target { end, object, .. } = first_contact(&sim, cue, aim.direction);
+    let Target {
+        end, object, wall, ..
+    } = first_contact(&sim, cue, aim.direction);
     gizmos.line(centre, at(end), palette.guide);
     gizmos.circle(flat(at(end)), r as f32, palette.guide);
-    if *assists == Assists::Assisted
-        && let Some(object) = object
-    {
-        // Object ball leaves along the line of centres; a stun cue ball
+    let (object_len, cue_len) = GUIDE_AFTER[usize::from(*assists == Assists::Assisted)];
+    // A path from `from` along `dir`, up to `len` or the next contact.
+    let leg = |from: DVec2, dir: DVec2, len: f64| {
+        let next = first_contact(&sim, from, dir).end;
+        from + dir * (next - from).length().min(len)
+    };
+    if let Some(object) = object {
+        // The object ball leaves along the line of centres; a stun cue ball
         // leaves along the tangent, on the side it was not pushed to.
         let out = (object - end).normalize_or_zero();
-        gizmos.line(at(object), at(object + out * 0.3), palette.guide_accent);
+        gizmos.line(
+            at(object),
+            at(leg(object, out, object_len)),
+            palette.guide_accent,
+        );
         let tangent = out.perp() * out.perp().dot(aim.direction).signum();
-        gizmos.line(at(end), at(end + tangent * 0.2), palette.guide_accent);
+        gizmos.line(at(end), at(leg(end, tangent, cue_len)), palette.guide);
+    } else if let Some(normal) = wall {
+        // Off the cushion: the angle out mirrors the angle in.
+        let out = aim.direction - 2.0 * aim.direction.dot(normal) * normal;
+        gizmos.line(
+            at(end),
+            at(leg(end + out * 1e-6, out, object_len)),
+            palette.guide,
+        );
     }
 }
 
@@ -769,6 +817,8 @@ pub(crate) struct Target {
     pub(crate) object: Option<DVec2>,
     /// The struck ball, if any.
     pub(crate) ball: Option<BallId>,
+    /// The cushion's normal, into the table, when a cushion comes first.
+    pub(crate) wall: Option<DVec2>,
 }
 
 /// Where the cue ball would first touch something if it travelled straight.
@@ -777,15 +827,17 @@ pub(crate) struct Target {
 pub(crate) fn first_contact(sim: &Simulation, from: DVec2, dir: DVec2) -> Target {
     let r = sim.table().ball.radius;
     let limit = sim.table().half_extents() - DVec2::splat(r);
-    let wall = [
-        (limit.x - from.x) / dir.x,
-        (-limit.x - from.x) / dir.x,
-        (limit.y - from.y) / dir.y,
-        (-limit.y - from.y) / dir.y,
+    let (wall, normal) = [
+        ((limit.x - from.x) / dir.x, DVec2::NEG_X),
+        ((-limit.x - from.x) / dir.x, DVec2::X),
+        ((limit.y - from.y) / dir.y, DVec2::NEG_Y),
+        ((-limit.y - from.y) / dir.y, DVec2::Y),
     ]
     .into_iter()
-    .filter(|t| t.is_finite() && *t > 0.0)
-    .fold(f64::INFINITY, f64::min);
+    .filter(|(t, _)| t.is_finite() && *t > 0.0)
+    .fold((f64::INFINITY, None), |best, (t, n)| {
+        if t < best.0 { (t, Some(n)) } else { best }
+    });
 
     let mut best = (wall, None);
     for (id, s) in sim.world.sample(sim.clock) {
@@ -809,6 +861,7 @@ pub(crate) fn first_contact(sim: &Simulation, from: DVec2, dir: DVec2) -> Target
         end: from + dir * best.0.min(10.0),
         object: best.1.map(|(_, p)| p),
         ball: best.1.map(|(id, _)| id),
+        wall: if best.1.is_none() { normal } else { None },
     }
 }
 

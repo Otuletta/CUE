@@ -335,23 +335,81 @@ pub(crate) fn after_shot(
 }
 
 /// Moves and spins every ball mesh to the simulated state at `clock`.
+/// How long a pocketed ball takes to drop out of sight, seconds.
+const SINK_TIME: f32 = 0.38;
+
+/// A ball on its way down a pocket: from where it was last drawn to below
+/// the pocket's centre.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Sink {
+    from: Vec3,
+    to: Vec3,
+    elapsed: f32,
+}
+
+/// Where a ball sinking for `t` of [`SINK_TIME`] is drawn, and its scale:
+/// it slides to the middle of the pocket while it falls, faster and faster,
+/// and shrinks a little into the dark.
+pub(crate) fn sink_pose(sink: &Sink, t: f32) -> (Vec3, f32) {
+    let t = t.clamp(0.0, 1.0);
+    let slide = 1.0 - (1.0 - t) * (1.0 - t);
+    let mut at = sink.from.lerp(sink.to, slide);
+    at.y = sink.from.y + (sink.to.y - sink.from.y) * t * t;
+    (at, 1.0 - 0.25 * t)
+}
+
 pub(crate) fn sync_balls(
     time: Res<Time>,
     paused: Res<Paused>,
     sim: Res<Simulation>,
+    motion: Res<crate::ReducedMotion>,
+    mut sinking: Local<std::collections::HashMap<BallId, Sink>>,
     mut balls: Query<(&Ball, &mut Transform, &mut Visibility)>,
 ) {
     let dt = if paused.0 { 0.0 } else { time.delta_secs() };
     let states: Vec<_> = sim.world.sample(sim.clock).collect();
+    let r = sim.table().ball.radius as f32;
     for (ball, mut transform, mut visibility) in &mut balls {
         let Some((_, s)) = states.iter().find(|(id, _)| *id == ball.0) else {
             continue;
         };
-        *visibility = if s.motion == Motion::Pocketed {
-            Visibility::Hidden
-        } else {
-            Visibility::Inherited
-        };
+        if s.motion == Motion::Pocketed {
+            // A ball that was on show when it dropped sinks out of sight;
+            // one already gone (after an undo, say) stays hidden.
+            let shown = *visibility != Visibility::Hidden;
+            if motion.0 {
+                *visibility = Visibility::Hidden;
+                continue;
+            }
+            let sink = sinking.entry(ball.0).or_insert_with(|| {
+                let at = DVec2::new(s.position.x, s.position.z);
+                let pocket = sim
+                    .world
+                    .geometry()
+                    .pockets()
+                    .iter()
+                    .min_by(|a, b| a.centre.distance(at).total_cmp(&b.centre.distance(at)))
+                    .map_or(at, |p| p.centre);
+                Sink {
+                    from: transform.translation,
+                    to: Vec3::new(pocket.x as f32, -2.5 * r, pocket.y as f32),
+                    elapsed: if shown { 0.0 } else { SINK_TIME },
+                }
+            });
+            sink.elapsed += dt;
+            if sink.elapsed >= SINK_TIME {
+                *visibility = Visibility::Hidden;
+            } else {
+                let (at, scale) = sink_pose(sink, sink.elapsed / SINK_TIME);
+                transform.translation = at;
+                transform.scale = Vec3::splat(scale);
+                *visibility = Visibility::Inherited;
+            }
+            continue;
+        }
+        sinking.remove(&ball.0);
+        *visibility = Visibility::Inherited;
+        transform.scale = Vec3::ONE;
         transform.translation = s.position.as_vec3();
         // Orientation is presentation only: integrate the sampled spin so the
         // markings visibly roll, slide and spin.
@@ -369,6 +427,23 @@ mod tests {
     fn play_out(sim: &mut Simulation) -> ShotReport {
         sim.world.run_to_rest(1e6).unwrap();
         sim.world.take_report().unwrap()
+    }
+
+    #[test]
+    fn a_sinking_ball_slides_into_the_pocket_falling_ever_faster() {
+        let sink = Sink {
+            from: Vec3::new(1.0, 0.03, 0.5),
+            to: Vec3::new(1.2, -0.07, 0.6),
+            elapsed: 0.0,
+        };
+        let (start, s0) = sink_pose(&sink, 0.0);
+        let (mid, _) = sink_pose(&sink, 0.5);
+        let (end, s1) = sink_pose(&sink, 1.0);
+        assert_eq!((start, s0), (sink.from, 1.0));
+        assert!((end - sink.to).length() < 1e-6 && s1 < 1.0);
+        // Most of the slide is done by half time, most of the fall is not.
+        assert!((mid.x - start.x) / (end.x - start.x) > 0.7);
+        assert!((mid.y - start.y) / (end.y - start.y) < 0.3);
     }
 
     #[test]
