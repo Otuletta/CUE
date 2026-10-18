@@ -4,6 +4,12 @@
 
 **[▶ Live demo](https://otuletta.github.io/CUE/)**: the framework-free example host, deployed from every green build of `main`.
 
+![A fresh rack of numbered balls on CUE's table](docs/images/rack.jpg)
+
+*Rendered by the engine itself, off-screen, with
+`CUE_STILL=rack.png CUE_VIEW=rack cargo run -p cue-game --example still --release`.
+No image, font or sound file ships with CUE.*
+
 CUE has two parts that ship together:
 
 - **A pool game** that runs inside a web page. There is no sign-up and no
