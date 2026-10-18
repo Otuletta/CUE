@@ -7,55 +7,17 @@ import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 
 import { launch } from '../browser.mjs';
-import { serve } from '../server.mjs';
+import { frameCount, framesPass, harness, nextEvent } from '../helpers.mjs';
 
-let server;
-let browser;
-
+let h;
 before(async () => {
-  server = await serve();
-  browser = await launch();
+  h = await harness();
 });
-
 after(async () => {
-  await browser?.close();
-  await server?.close();
+  await h?.close();
 });
 
-/** A fresh page on the test host, in `using` (the shared browser by default). */
-async function open({ using = browser, viewport = { width: 800, height: 900 } } = {}) {
-  const context = await using.newContext({ viewport });
-  const page = await context.newPage();
-  const errors = [];
-  page.on('pageerror', (error) => errors.push(String(error)));
-  await page.goto(`${server.origin}/e2e/host.html`);
-  await page.waitForFunction(() => window.hostReady);
-  return {
-    page,
-    /** Checks the page stayed clean, then closes it. */
-    async close({ allowErrors = false } = {}) {
-      const violations = await page.evaluate(() => window.violations);
-      await context.close();
-      assert.deepEqual(violations, [], 'Content Security Policy violations');
-      if (!allowErrors) assert.deepEqual(errors, [], 'uncaught page errors');
-      else if (errors.length) console.log(`page errors, allowed here: ${errors.join(' | ')}`);
-    },
-  };
-}
-
-const frameCount = (page) => page.evaluate(() => window.game.stats().frames);
-
-/** Waits until the engine has run `n` more frames. */
-async function framesPass(page, n = 3) {
-  const start = await frameCount(page);
-  await page.waitForFunction((target) => window.game.stats().frames >= target, start + n);
-}
-
-/** Waits for an event in `window.events` and returns its detail. */
-async function nextEvent(page, name, timeout = 30_000) {
-  await page.waitForFunction((n) => window.events.some(([e]) => e === n), name, { timeout });
-  return page.evaluate((n) => window.events.find(([e]) => e === n)[1], name);
-}
+const open = (options) => h.open(options);
 
 describe('one instance, from mount to destroy', () => {
   let tab;

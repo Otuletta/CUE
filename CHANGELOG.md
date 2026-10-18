@@ -7,6 +7,31 @@ All notable changes to CUE. The format follows
 A change that alters shot outcomes is called out on its own line and bumps
 the physics profile id, even when no signature changes.
 
+## [Unreleased]
+
+### Added
+
+- **Accessibility checks in the browser tests:**
+  - an axe audit of every dialog and state, in English and Spanish;
+  - focus trapping in dialogs, `Esc` and focus return;
+  - the shortcuts, and the announcement of each shot's result.
+- **A match played through the controls, in the browser tests:**
+  - setup;
+  - a break with the power slider and the Shoot button;
+  - decisions, turns and the call picker;
+  - a stalemate;
+  - free play's Undo and New rack.
+
+### Fixed
+
+- The Shoot button could ignore a shot right after the power slider moved.
+  It checked the power against the last frame's state, still the old value,
+  and showed the "set the power" hint instead of shooting.
+
+- Shift+Tab could leave a dialog for the canvas behind it. This happened
+  when a radio group's checked option was not its first, or when focus
+  started on a dialog's heading.
+
 ## [1.0.0-beta.2] - 2026-10-18
 
 Hardening before 1.0: the events now match the specification's table

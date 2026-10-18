@@ -31,7 +31,38 @@ need validation with assistive technology users, which has not happened yet
 - Aiming precisely by keyboard is slower than with a pointer.
 - Not yet tested with VoiceOver, NVDA or TalkBack users.
 
-## How to check
+## Automated checks
+
+`web/e2e/test/accessibility.test.mjs` runs on every pull request, in
+headless Chrome against the built bundle (spec §24.1):
+
+- **An axe audit** (axe-core, serious and critical findings fail) of every
+  state, in English and in Spanish:
+  - the table with its toolbar and dock;
+  - the how-to-play, settings, paused, game and match setup dialogs;
+  - a match in progress;
+  - the message shown when the engine cannot load.
+
+  A guard test checks that the audit really reaches every visible button
+  inside the shadow root.
+- **Focus stays in open dialogs** with Tab and Shift+Tab, including one that
+  opens with its heading focused.
+- **`Esc` closes a dialog** and returns focus to the control that opened it.
+- **The shortcuts** (`H`, `M`, `P`) work from the table.
+- **A shot's result is announced** in the polite live region.
+
+The string tests (`web/package/test/i18n.test.mjs`) check that every
+string exists in both languages with the same shape.
+
+These checks found one real defect, fixed after `1.0.0-beta.2`. With a
+theme other than the first selected, Shift+Tab could leave the settings
+dialog for the canvas behind it: a radio group is a single Tab stop, which
+the focus trap did not account for.
+
+## How to check by hand
+
+Automated checks cannot judge what a person hears or sees. These need a
+person:
 
 1. Unplug the mouse. Tab to the table, play a shot, open Settings, change the
    theme, close it with `Esc`, and confirm focus returns.

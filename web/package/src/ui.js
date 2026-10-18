@@ -51,6 +51,9 @@ export function createOverlay(root, deps) {
   // on each other instead of on a snapshot that is one frame old.
   let tip = { x: 0, y: 0 };
   let draggingPower = false;
+  // The power last set with the slider. The engine applies it on its next
+  // frame, so until the snapshot catches up this is the power that counts.
+  let askedPower = null;
   let toastTimer = 0;
   let raf = 0;
   let openSheet = null;
@@ -105,21 +108,29 @@ export function createOverlay(root, deps) {
     back?.focus?.({ preventScroll: true });
   }
 
-  // Keep Tab inside an open dialog.
+  // What Tab can reach in `card`. A radio group is a single stop, at its
+  // checked option (the first when none is), as browsers make it.
+  const tabStops = (card) =>
+    [...card.querySelectorAll('button, input, a[href], [tabindex="0"]')].filter((el) => {
+      if (el.disabled || el.checkVisibility?.() === false) return false;
+      if (el.type !== 'radio') return true;
+      const group = [...card.querySelectorAll(`input[type="radio"][name="${el.name}"]`)];
+      return el === (group.find((r) => r.checked) ?? group[0]);
+    });
+
+  // Keep Tab inside an open dialog: wrap at either end, and from anything
+  // Tab cannot reach (a heading focused on opening) go to the first or last
+  // stop. Without this, Shift+Tab would land on the canvas behind.
   shadow.addEventListener('keydown', (e) => {
     if (!openSheet || e.key !== 'Tab') return;
-    const card = $(`[data-sheet="${openSheet}"] .card`);
-    const items = [...card.querySelectorAll('button, input, a[href]')].filter((el) => !el.disabled);
-    if (!items.length) return;
-    const [first, last] = [items[0], items[items.length - 1]];
-    const active = shadow.activeElement;
-    if (e.shiftKey && active === first) {
-      last.focus();
-      e.preventDefault();
-    } else if (!e.shiftKey && active === last) {
-      first.focus();
-      e.preventDefault();
-    }
+    const stops = tabStops($(`[data-sheet="${openSheet}"] .card`));
+    if (!stops.length) return;
+    const at = stops.indexOf(shadow.activeElement);
+    const last = stops.length - 1;
+    const next = e.shiftKey ? (at <= 0 ? last : null) : at === -1 || at === last ? 0 : null;
+    if (next === null) return;
+    stops[next].focus();
+    e.preventDefault();
   });
 
   // --- Actions ------------------------------------------------------------
@@ -140,7 +151,7 @@ export function createOverlay(root, deps) {
 
   function shoot() {
     if (!snapshot?.atRest) return;
-    if ((snapshot.power ?? 0) < (snapshot.minPower ?? 0.03)) {
+    if ((askedPower ?? snapshot.power ?? 0) < (snapshot.minPower ?? 0.03)) {
       announce(t.shootHint);
       return;
     }
@@ -241,7 +252,8 @@ export function createOverlay(root, deps) {
   power.addEventListener('blur', () => (draggingPower = false));
   power.addEventListener('input', () => {
     powerOut.value = `${power.value}%`;
-    api.setPower(Number(power.value) / 100);
+    askedPower = Number(power.value) / 100;
+    api.setPower(askedPower);
   });
 
   function setSpin(x, y) {
@@ -340,6 +352,7 @@ export function createOverlay(root, deps) {
     }
     if (changed('inHand')) ui.toggleAttribute('data-in-hand', next.inHand);
     if (changed('canUndo')) button('undo').disabled = !next.canUndo;
+    if (changed('power')) askedPower = null;
     if (changed('power') && !draggingPower) {
       const percent = Math.round(next.power * 100);
       power.value = String(percent);
