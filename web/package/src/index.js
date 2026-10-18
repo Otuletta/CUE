@@ -452,10 +452,12 @@ async function mount(options, claim) {
     return error;
   };
 
+  // First: a page that ran CUE supports it, and probing WebGL 2 can take a
+  // second on a software renderer.
+  if (spent) throw fail('reload', new Error('RELOAD_REQUIRED'));
   if (typeof WebAssembly !== 'object' || !hasWebGL2()) {
     throw fail('unsupported', new Error('UNSUPPORTED_BROWSER'));
   }
-  if (spent) throw fail('reload', new Error('RELOAD_REQUIRED'));
 
   // Load the module, then stream the binary with honest progress.
   try {
