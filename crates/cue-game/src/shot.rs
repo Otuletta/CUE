@@ -37,10 +37,22 @@ use crate::{
 const FULL_PULL: f64 = 0.45;
 /// Shots below this power are refused, so a stray click never fires.
 pub const MIN_SHOT_POWER: f64 = 0.03;
-/// Perceptual power curve: more resolution for soft shots. With the
-/// profile's 12 m/s at full power, half power is 3 m/s and a quarter 0.75
-/// m/s, about what they were before full power became a real break.
-const POWER_EXPONENT: f64 = 2.0;
+/// How the power slider maps to the strike, as `(top, curve)`: full power is
+/// `top` of the profile's 12 m/s, and the slider follows `power^curve`, which
+/// gives soft shots more resolution.
+///
+/// The break gets the full stroke, a strong real break at 12 m/s, so it opens
+/// the rack. Every other shot tops out at a hard 7 m/s: a real power shot,
+/// not a break by accident. Half power is then 2.3 m/s and a quarter 0.76.
+const BREAK_POWER: (f64, f64) = (1.0, 2.0);
+const SHOT_POWER: (f64, f64) = (7.0 / 12.0, 1.6);
+
+/// The strike's power, as a fraction of the profile's top speed, for a
+/// slider at `power` on the break or on any other shot.
+fn strike_power(power: f64, on_break: bool) -> f64 {
+    let (top, curve) = if on_break { BREAK_POWER } else { SHOT_POWER };
+    top * power.powf(curve)
+}
 /// Keyboard aim speed, radians per second (and with `Shift` held).
 const KEY_AIM_SPEED: (f64, f64) = (1.0, 0.08);
 /// With `Shift` held, the mouse turns the aim by this fraction of how far it
@@ -229,7 +241,8 @@ fn shoot(
     };
     let strike = Strike {
         direction: aim.direction,
-        power: aim.power.powf(POWER_EXPONENT),
+        // A fresh rack has taken no strike yet: this is the break.
+        power: strike_power(aim.power, sim.world.shots() == 0),
         tip_offset: aim.tip,
     };
     if motion.0 {
@@ -872,6 +885,8 @@ mod tests {
         eight_ball::{Decision, Next, Ruling, Situation},
     };
 
+    use cue_physics::PhysicsProfile;
+
     use super::*;
     use crate::eight::GameSetup;
 
@@ -893,6 +908,27 @@ mod tests {
             assert!(frames < 100, "the swing never ended");
         }
         frames
+    }
+
+    #[test]
+    fn full_power_is_a_break_only_on_the_break() {
+        let top = PhysicsProfile::baseline().cue.max_speed;
+        let speed = |power, on_break| strike_power(power, on_break) * top;
+        assert!((speed(1.0, true) - 12.0).abs() < 1e-9);
+        assert!((speed(1.0, false) - 7.0).abs() < 1e-9);
+        // Soft and medium shots keep useful speeds.
+        assert!(
+            (speed(0.5, false) - 2.31).abs() < 0.01,
+            "{}",
+            speed(0.5, false)
+        );
+        assert!(
+            (speed(0.25, false) - 0.76).abs() < 0.01,
+            "{}",
+            speed(0.25, false)
+        );
+        // The slider never asks for more than the profile allows.
+        assert!(strike_power(1.0, true) <= 1.0 && strike_power(MIN_SHOT_POWER, false) > 0.0);
     }
 
     #[test]

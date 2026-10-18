@@ -17,8 +17,10 @@ the physics profile id, even when no signature changes.
   now drives about 6 balls to a rail and pockets one most of the time,
   where before it drove about 4 and rarely pocketed anything
   (`docs/physics-model.md`, "The break").
-- The power slider's curve is `p²` instead of `p^1.6`, so soft and medium
-  shots keep their speeds.
+- **Full power is a break only on the break.** The break's full power is
+  12 m/s (slider curve `p²`). Every other shot tops out at a hard 7 m/s
+  (curve `p^1.6`): half power is 2.3 m/s, a quarter 0.76 m/s. At 12 m/s
+  any full-power shot ran into eight cushions.
 
 ### Added
 

@@ -238,10 +238,18 @@ A wider spacing (1–2 mm) did not spread the rack further. A hit a few
 millimetres off the apex still loses part of the break, as on a real table.
 `a_full_power_break_opens_the_rack` holds these figures.
 
-The input layer's power curve went from `p^1.6` to `p²`. Soft and medium
-shots keep the speeds they had, while the top of the slider reaches the new
-maximum. Half power is now 3.0 m/s (it was 2.6) and a quarter is 0.75 m/s
-(it was 0.87).
+**Only the break gets the full stroke.** The input layer maps the power
+slider differently on the break, a fresh rack's first strike:
+
+| | Full power | Half | Quarter | Curve |
+|---|---:|---:|---:|---|
+| The break | 12 m/s | 3.0 m/s | 0.75 m/s | `p²` |
+| Every other shot | 7 m/s | 2.3 m/s | 0.76 m/s | `p^1.6` |
+
+As on a real table, nothing but the break is struck that hard. A full-power
+shot at 12 m/s runs the cue ball into eight cushions, which players found
+"far too strong". At 7 m/s it is a hard power shot of about five. The
+physics profile itself is unchanged: 12 m/s stays its top speed.
 
 **Calibration status.** The profile is validated against the textbook and
 published behaviours listed above, which the test suite asserts. It has
