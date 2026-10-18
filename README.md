@@ -18,7 +18,7 @@ CUE has two parts that ship together:
 - **A library** that other sites can embed with one call and a container
   element. Embedding it does not require knowing Rust or Bevy.
 
-> **Status: `1.0.0-beta.2`, feature-complete and in testing.** Free play,
+> **Status: `1.0.0-beta.3`, feature-complete and in testing.** Free play,
 > local eight-ball with WPA or casual rules, numbered balls and a modelled
 > cue, adaptive graphics, procedural sound, and an embeddable npm package
 > tested in a Vite app and under a strict CSP. Device testing is what
@@ -28,7 +28,7 @@ CUE has two parts that ship together:
 ## Use it
 
 ```sh
-npm install @tuletta/cue   # provisional name; see docs/releasing.md
+npm install @tuletta/cue   # betas: npm install @tuletta/cue@beta
 ```
 
 ```js
@@ -203,7 +203,7 @@ in [docs/controls.md](docs/controls.md).
 | 3 | Free Play (built; [usability test](docs/usability-test.md) pending) | A first-time visitor can shoot, understand the result, reset and leave |
 | 4 | Local eight-ball (built; review pending) | Every rule transition in scope is covered by tests |
 | 5 | Visuals, audio, polish (built, device check pending) | Approved on the device matrix with no physics regressions |
-| **6** | Open-source 1.0 (`1.0.0-beta.2`; release after testing) | An outside developer can embed CUE using only the public docs |
+| **6** | Open-source 1.0 (`1.0.0-beta.3`; release after testing) | An outside developer can embed CUE using only the public docs |
 
 The full product and engineering specification (in Spanish) is in
 [`docs/specification.es.md`](docs/specification.es.md).
