@@ -48,6 +48,7 @@ jobs:
         run: |
           scripts/build-web.sh
           scripts/consumer-test.sh
+          (cd web/e2e && npm ci && npm test)
 
       - name: Assemble the release files
         run: |

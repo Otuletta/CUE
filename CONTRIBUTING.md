@@ -24,6 +24,9 @@ build, and every check CI runs. Run them before opening a pull request.
     table changes.
   - **Wrapper and controls:** `web/package/test`. Every interface string
     must exist in English and Spanish; the tests check it.
+  - **Page lifecycle:** `web/e2e`, in headless Chrome against the built
+    bundle. A change to loading, pausing, events or teardown needs a case
+    there.
 - **No asset files** unless agreed first. CUE generates its textures, meshes
   and sounds. An exception goes in [docs/assets.md](docs/assets.md) with its
   source and licence before merging.

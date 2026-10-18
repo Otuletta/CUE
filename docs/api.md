@@ -24,7 +24,8 @@ first frame has run. The container must have a size; CUE fills it.
 | `locale` | `'en' \| 'es'` | browser | Interface language. |
 | `theme` | `'classic' \| 'studio' \| 'contrast'` | saved, else `studio` | Presentation only. |
 | `assists` | `'off' \| 'basic' \| 'assisted'` | saved, else `basic` | Aiming guide. |
-| `quality` | `'auto' \| 'high' \| 'medium' \| 'low'` | saved, else `auto` | Anti-aliasing and shadows; never the physics. |
+| `quality` | `'auto' \| 'high' \| 'medium' \| 'low'` | saved, else `auto` | Anti-aliasing, shadows and, at `low`, resolution; never the physics. |
+| `render` | `{ pixelRatioCap? }` | `{ pixelRatioCap: 2 }` | Pixels rendered per CSS pixel at most, on denser screens: a 3× phone renders 2×, which costs about half as much. At least 0.5; `Infinity` renders every device pixel. The `low` tier renders at most 1.5. |
 | `audio` | `{ enabled?, volume? }` | saved, else on at 0.7 | |
 | `persist` | `boolean` | `true` | Save preferences in `localStorage` (`cue:v1:settings`). |
 | `mode` | `'free-play' \| 'eight-ball-local'` | `free-play` | The game to start with. |
@@ -34,6 +35,7 @@ first frame has run. The container must have a size; CUE fills it.
 | `fallbackUrl` | `string` | | Link shown when the browser cannot run CUE. |
 | `rulesUrl` | `string` | | Link to the rules notes, shown in the match setup. |
 | `assetBase` | `string \| URL` | the module's folder | Where `manifest.js`, `manifest.json` and `pkg/` are served (a CDN, or a copy in a public folder). |
+| `signal` | `AbortSignal` | | Cancels the load ([below](#cancelling-a-load)). |
 
 ### Rejections
 
@@ -45,6 +47,50 @@ The promise rejects with an `Error` whose message is one of these codes:
 | `RELOAD_REQUIRED` | An instance was destroyed on this page; only a reload can create another. |
 | `UNSUPPORTED_BROWSER` | No WebAssembly or WebGL 2. The built-in UI shows an explanation. |
 | `LOAD_FAILED: …` | The module or binary could not be loaded, with the reason after the colon. |
+| `ABORTED` | The load was cancelled with `signal`. The error's `name` is `AbortError` and its `cause` the signal's reason. |
+
+### Cancelling a load
+
+Pass an `AbortSignal` to stop a load the visitor no longer wants, for
+example when they leave the page while CUE downloads:
+
+```js
+const controller = new AbortController();
+cancelButton.onclick = () => controller.abort();
+try {
+  const game = await createCue({ container, signal: controller.signal });
+} catch (error) {
+  if (error.name !== 'AbortError') throw error;
+}
+```
+
+- **Before the engine starts,** which is nearly all of the load, aborting
+  stops the download and removes everything CUE added. The page can call
+  `createCue` again straight away, even in the same task.
+- **In the last frames before the promise settles,** the engine is already
+  running, so aborting destroys it: as after any `destroy()`, a new
+  instance needs a reload.
+- **Once `createCue` has resolved,** the signal has no effect. Use
+  `pause()`, or `destroy()` when CUE will not come back.
+
+To hide CUE during a route change, keep the load going and pause the
+instance when it arrives, as in
+[web-integration.md](web-integration.md#single-page-apps).
+
+### Failures after start
+
+Two failures can end a running instance. Each is reported by an `error`
+event, and the built-in UI replaces the table with a message and a Reload
+button:
+
+| Code | When |
+|---|---|
+| `ENGINE_FAILED` | The engine hit an internal error. The details go to the console; the event carries only the code. |
+| `CONTEXT_LOST` | The browser dropped the WebGL context, for example after a GPU reset. |
+
+After either one, methods do nothing instead of throwing, so the host's own
+code keeps working; `getState()` returns `null`. `destroy()` still removes
+everything. A new instance needs a reload.
 
 ## Instance
 
@@ -53,8 +99,8 @@ The promise rejects with an `Error` whose message is one of these codes:
 | Method | Does |
 |---|---|
 | `start(): Promise<void>` | Resolves once the game runs. `createCue` already starts it, so this only resumes a paused instance. It never creates a second one. |
-| `pause()` | Stops simulation, input, sound and rendering. A paused instance runs **0 frames**. |
-| `resume()` | Continues a paused instance. |
+| `pause(reason?)` | Stops simulation, input, sound and rendering. A paused instance runs **0 frames**. `reason`, a short word such as `hidden` or `route`, is reported by the `paused` event; the default is `host`. |
+| `resume(reason?)` | Continues a paused instance. `reason` is reported by the `resumed` event, as for `pause`. |
 | `attach(container)` | Moves the game into another element. State, preferences and the GPU surface carry over. For single-page apps. |
 | `resize()` | Re-measures the layout. The canvas follows its container by itself; call this after moves or restyles that a resize does not cover. |
 | `destroy(): Promise<void>` | Stops everything and removes all that CUE added. Idempotent: it returns the same promise every time. Afterwards every method throws `INSTANCE_DESTROYED`, `getState()` returns `null`, and `createCue` rejects with `RELOAD_REQUIRED`. |
@@ -100,7 +146,7 @@ top of the screen and the foot is on the right.
 | `showHelp()` | Opens the how-to-play dialog (built-in UI). |
 | `on(name, handler): () => void` | Subscribes to an event. Returns a function that unsubscribes. Unknown names throw. |
 | `stats()` | `{ frames }`, the frames run since mounting. |
-| `version` | The build version, for example `1.0.0-beta.1`. |
+| `version` | The build version, for example `1.0.0-beta.2`. |
 
 ## Events
 
@@ -110,28 +156,32 @@ the game or other handlers; the error is rethrown asynchronously.
 | Event | Detail |
 |---|---|
 | `ready` | The build version. |
-| `shot-start` | — |
+| `shot-start` | `{ shotId, shooter }`: the shot's id, which its `shot-end` carries too, and the seat that shot (`a` or `b`), or `null` in free play. |
 | `ball-pocketed` | `{ ballId, pocketId }`, where `ballId` 0 is the cue ball. |
 | `shot-end` | `{ shotId, firstContacts, pocketed: [{ ballId, pocketId }], cueBallPocketed, objectBallsToCushion }`, or `{ abandoned: true }` after an undo or a re-rack mid-shot. |
 | `racked` | `{ cleared }`: `true` when free play re-racked a cleared table. |
-| `undo`, `paused`, `resumed`, `destroyed` | — |
+| `undo`, `destroyed` | — |
+| `paused` / `resumed` | `{ reason }`: `user` when the player used CUE's pause control, else the reason given to `pause` or `resume` (`host` by default). |
 | `settings-change` | The preferences. |
 | `fullscreen-change` | `{ fullscreen }` |
-| `error` | `{ code }`, one of the rejection codes above. |
+| `error` | `{ code, message }`: `code` is one of the rejection codes above; `message` is a plain description, safe to show, with no paths or page data. |
 | `new-game` | `{ mode: 'free-play' \| 'eight-ball' }` |
 | `ruling` | `{ shooter, call, fouls, wrongBall, pocketed, assigned, next, inHand }`: the referee's verdict on a shot. `next` is `continue`, `pass`, `decide` or `over`. |
 | `foul` | `{ shooter, fouls, wrongBall }` |
 | `groups-assigned` | `{ seat, group }` |
-| `turn-changed` | `{ shooter, inHand }` |
+| `turn-changed` | `{ shooter, previous, inHand }`: the incoming and the outgoing player. |
 | `decision-required` | `{ chooser, situation, options, cueBallOff }` |
 | `decided` | `{ choice, shooter, inHand, stage }` |
-| `rack-over` / `match-over` | `{ winner, loss, score }`: `loss` is `null` for a legal win, `score` is `[a, b]`. |
+| `game-over` / `match-over` | `{ winner, loss, score }` once a rack, or the match, is decided: `loss` is `null` for a legal win, else why the other player lost; `score` is `[a, b]`. |
 | `ball-spotted` | `{ ballId }` |
 | `shot-refused` / `call-refused` | `{ reason }`, a refusal code ([below](#codes)). |
 
 Per shot there is exactly one `shot-start` and one `shot-end`, with any
 number of `ball-pocketed` events between them. In a match, `ruling` follows
 `shot-end`, and the more specific events follow the ruling.
+
+Event names and detail shapes are part of the versioned API: within a major
+version, details only gain fields.
 
 ## State
 

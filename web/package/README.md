@@ -67,19 +67,18 @@ windowing layer, allows one event loop per page. Keep the instance and move
 it instead:
 
 ```js
-let cue; // module scope: survives route changes
+let cue; // module scope: survives route changes. A promise, so overlapping calls share one.
 
-export async function show(container) {
-  if (cue) {
-    cue.attach(container);
-    cue.resume();
-  } else {
-    cue = await createCue({ container });
-  }
+export function show(container) {
+  cue ??= createCue({ container });
+  return cue.then((game) => {
+    game.attach(container);
+    game.resume('route');
+  });
 }
 
 export function hide() {
-  cue?.pause(); // 0 frames: nothing runs while paused
+  cue?.then((game) => game.pause('route'), () => {}); // 0 frames while paused
 }
 ```
 

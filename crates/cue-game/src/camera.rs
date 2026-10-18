@@ -2,7 +2,7 @@
 //!
 //! Landscape screens see the table lengthwise; portrait screens see it rotated
 //! so it still fills the view. The tilt is slight: enough to read the balls as
-//! spheres, not so much that it distorts aiming (ADR-005 is still open).
+//! spheres, not so much that it distorts aiming (ADR-0013).
 //!
 //! The host's controls cover bands at the top and bottom of the canvas. The
 //! camera keeps the playing surface clear of those bands, where the balls

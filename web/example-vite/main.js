@@ -8,6 +8,6 @@ play.addEventListener('click', async () => {
   const game = await createCue({ container: document.getElementById('cue') });
   play.remove();
   game.on('shot-end', (shot) => console.info('shot', shot));
-  game.on('rack-over', ({ winner, score }) => console.info(`rack to ${winner}`, score));
+  game.on('game-over', ({ winner, score }) => console.info(`rack to ${winner}`, score));
   window.cue = game; // for poking around in the console
 });

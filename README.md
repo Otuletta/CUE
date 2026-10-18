@@ -18,7 +18,7 @@ CUE has two parts that ship together:
 - **A library** that other sites can embed with one call and a container
   element. Embedding it does not require knowing Rust or Bevy.
 
-> **Status: `1.0.0-beta.1`, feature-complete and in testing.** Free play,
+> **Status: `1.0.0-beta.2`, feature-complete and in testing.** Free play,
 > local eight-ball with WPA or casual rules, numbered balls and a modelled
 > cue, adaptive graphics, procedural sound, and an embeddable npm package
 > tested in a Vite app and under a strict CSP. Device testing is what
@@ -34,7 +34,7 @@ npm install @tuletta/cue   # provisional name; see docs/releasing.md
 ```js
 const { createCue } = await import('@tuletta/cue');
 const game = await createCue({ container: document.querySelector('#cue') });
-game.on('rack-over', ({ winner }) => console.log(`rack to ${winner}`));
+game.on('game-over', ({ winner }) => console.log(`rack to ${winner}`));
 ```
 
 - **[Web integration](docs/web-integration.md):** plain HTML, Vite, React,
@@ -106,8 +106,9 @@ game.on('rack-over', ({ winner }) => console.log(`rack to ${winner}`));
   of the top bar and the dock. The camera moves off-axis, so aiming is
   unaffected.
 - **Graphics quality:** Auto, High, Medium and Low change only
-  anti-aliasing and shadows. Auto steps down by itself if the frame rate
-  stays low.
+  anti-aliasing, shadows and, at Low, the resolution. Auto steps down by
+  itself if the frame rate stays low. Dense screens render at most two
+  pixels per CSS pixel (`render.pixelRatioCap`).
 - **Themes and preferences:** classic, studio and high-contrast themes, plus
   three aiming-guide levels. Settings are validated and kept in `localStorage`
   under `cue:v1:*`.
@@ -127,7 +128,7 @@ game.on('rack-over', ({ winner }) => console.log(`rack to ${winner}`));
   summary), `racked`, `undo`, `paused`, `resumed`, `settings-change`,
   `fullscreen-change`, `destroyed`, `error`. In a match the referee also
   reports `new-game`, `ruling`, `foul`, `groups-assigned`, `turn-changed`,
-  `decision-required`, `decided`, `rack-over`, `match-over`, `ball-spotted`,
+  `decision-required`, `decided`, `game-over`, `match-over`, `ball-spotted`,
   `shot-refused` and `call-refused`. Every name in these events (fouls,
   options, pockets) is a stable code, ready for the host to translate.
   Loading shows real progress from a build manifest. The vanilla example
@@ -200,9 +201,9 @@ in [docs/controls.md](docs/controls.md).
 | 1 ✓ | Vertical slice in the browser | A simple table with a controllable shot in WASM, plus real size and FPS measurements |
 | 2 ✓ | Billiards engine | Critical physics cases pass; the solver produces a `ShotReport` |
 | 3 | Free Play (built; [usability test](docs/usability-test.md) pending) | A first-time visitor can shoot, understand the result, reset and leave |
-| 4 | Local eight-ball (built, in review) | Every rule transition in scope is covered by tests |
+| 4 | Local eight-ball (built; review pending) | Every rule transition in scope is covered by tests |
 | 5 | Visuals, audio, polish (built, device check pending) | Approved on the device matrix with no physics regressions |
-| **6** | Open-source 1.0 (`1.0.0-beta.1`; release after testing) | An outside developer can embed CUE using only the public docs |
+| **6** | Open-source 1.0 (`1.0.0-beta.2`; release after testing) | An outside developer can embed CUE using only the public docs |
 
 The full product and engineering specification (in Spanish) is in
 [`docs/specification.es.md`](docs/specification.es.md).
@@ -220,10 +221,11 @@ The full product and engineering specification (in Spanish) is in
 | [Browser support](docs/browser-support.md) · [Assets](docs/assets.md) | What is tested; what ships |
 | [Releasing](docs/releasing.md) · [Changelog](CHANGELOG.md) | Versions and releases |
 | [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) | Working on CUE |
-| [Decisions](docs/adr) | 12 ADRs with their trade-offs |
+| [Decisions](docs/adr) | 13 ADRs with their trade-offs, and where each open question of the spec was answered |
 
 ## License
 
 The code is dual-licensed under [MIT](LICENSE-MIT) or
-[Apache-2.0](LICENSE-APACHE), at your option. Art and audio assets will carry
-their own attribution in `assets/ATTRIBUTION.md`.
+[Apache-2.0](LICENSE-APACHE), at your option. CUE ships no third-party assets:
+every texture, mesh and sound is generated in code, under the same licence
+([docs/assets.md](docs/assets.md)).

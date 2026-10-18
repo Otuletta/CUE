@@ -27,7 +27,7 @@ mod eight;
 use std::{
     cell::RefCell,
     sync::{
-        Mutex, PoisonError,
+        Mutex, PoisonError, TryLockError,
         atomic::{AtomicU32, Ordering},
     },
     time::Duration,
@@ -37,6 +37,7 @@ use bevy::{
     asset::AssetMetaCheck,
     log::{Level, LogPlugin},
     prelude::*,
+    window::WindowResolution,
     winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent},
 };
 use cue_audio::Sound;
@@ -58,8 +59,10 @@ use crate::eight::MatchSnapshot;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Command {
-    Pause,
-    Resume,
+    /// With the reason reported by the `paused` event.
+    Pause(String),
+    /// With the reason reported by the `resumed` event.
+    Resume(String),
     Destroy,
     Game(GameCommand),
 }
@@ -140,7 +143,11 @@ pub fn version() -> String {
 
 /// Starts CUE, rendering into the `<canvas>` matched by `canvas_selector`.
 ///
-/// The canvas is sized to its parent element. Returns immediately; the game
+/// The canvas is sized to its parent element. `width` and `height` are its
+/// current size in CSS pixels, so the first frame already renders at the size
+/// the page shows: Bevy would otherwise start at 1280 × 720, which on a dense
+/// phone screen is a burst of GPU memory before the canvas settles. Returns
+/// immediately; the game
 /// runs on the browser's animation frames and emits `ready` once its first
 /// frame has run.
 ///
@@ -150,7 +157,7 @@ pub fn version() -> String {
 /// that need repeated mounting should pause and resume instead, or isolate
 /// CUE in an iframe (ADR-0006).
 #[wasm_bindgen]
-pub fn mount(canvas_selector: &str) -> Result<(), JsError> {
+pub fn mount(canvas_selector: &str, width: u32, height: u32) -> Result<(), JsError> {
     match lifecycle() {
         Lifecycle::Mounted => return Err(JsError::new("INSTANCE_ALREADY_MOUNTED")),
         Lifecycle::Destroyed => return Err(JsError::new("RELOAD_REQUIRED")),
@@ -158,53 +165,88 @@ pub fn mount(canvas_selector: &str) -> Result<(), JsError> {
     }
     set_lifecycle(Lifecycle::Mounted);
 
-    App::new()
-        .add_plugins(
-            DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        canvas: Some(canvas_selector.to_owned()),
-                        fit_canvas_to_parent: true,
-                        // Only events aimed at the canvas are captured.
-                        prevent_default_event_handling: true,
-                        ..default()
-                    }),
-                    ..default()
-                })
-                // CUE ships no `.meta` files; don't probe the server for them.
-                .set(AssetPlugin {
-                    meta_check: AssetMetaCheck::Never,
-                    ..default()
-                })
-                // Keep the host's console quiet: warnings and errors only,
-                // minus the expected "feature unavailable on WebGL2" notices.
-                .set(LogPlugin {
-                    level: Level::WARN,
-                    filter: "wgpu=error,naga=error,bevy_core_pipeline=error,bevy_pbr=error".into(),
+    let mut app = App::new();
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    canvas: Some(canvas_selector.to_owned()),
+                    // Logical, at the starting scale factor of 1: winit
+                    // applies the screen's pixel ratio.
+                    resolution: WindowResolution::new(width.max(1), height.max(1)),
+                    fit_canvas_to_parent: true,
+                    // Only events aimed at the canvas are captured.
+                    prevent_default_event_handling: true,
                     ..default()
                 }),
-        )
-        .add_plugins(CuePlugin)
-        .insert_resource(WinitSettings::game())
-        .add_systems(Startup, install_waker)
-        .add_systems(First, apply_commands)
-        // Published first, so a listener that reads `state()` while handling
-        // an event sees the state that event left behind.
-        .add_systems(Last, (publish_state, emit_events).chain())
-        .run();
+                ..default()
+            })
+            // CUE ships no `.meta` files; don't probe the server for them.
+            .set(AssetPlugin {
+                meta_check: AssetMetaCheck::Never,
+                ..default()
+            })
+            // Keep the host's console quiet: warnings and errors only,
+            // minus the expected "feature unavailable on WebGL2" notices.
+            .set(LogPlugin {
+                level: Level::WARN,
+                filter: "wgpu=error,naga=error,bevy_core_pipeline=error,bevy_pbr=error".into(),
+                ..default()
+            }),
+    )
+    .add_plugins(CuePlugin)
+    .insert_resource(WinitSettings::game())
+    .add_systems(Startup, install_waker)
+    .add_systems(First, apply_commands)
+    // Published first, so a listener that reads `state()` while handling
+    // an event sees the state that event left behind.
+    .add_systems(Last, (publish_state, emit_events, report_tier).chain());
+    // After the plugins, so it wraps the console hook Bevy installs.
+    report_panics();
+    app.run();
     Ok(())
 }
 
-/// Pauses simulation, input, sound and rendering.
-#[wasm_bindgen]
-pub fn pause() -> Result<(), JsError> {
-    send(Command::Pause)
+/// Tells the host when the engine panics, after the previous hook has logged
+/// the details to the console. WebAssembly aborts right after, so the
+/// instance cannot go on: the event lets the wrapper say so instead of
+/// leaving a frozen table. The event carries only a code, never the panic
+/// message.
+fn report_panics() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        previous(info);
+        // Nothing here may lock or borrow what the panic interrupted.
+        let listener = LISTENER
+            .try_with(|l| l.try_borrow().ok().and_then(|l| l.clone()))
+            .ok()
+            .flatten();
+        if let Some(f) = listener {
+            let detail = object(&[("code", "ENGINE_FAILED".into())]);
+            let _ = f.call2(&JsValue::NULL, &JsValue::from_str("error"), &detail);
+        }
+        // Later calls get `INSTANCE_NOT_MOUNTED` and a new mount
+        // `RELOAD_REQUIRED`, rather than running a broken engine.
+        match LIFECYCLE.try_lock() {
+            Ok(mut state) => *state = Lifecycle::Destroyed,
+            Err(TryLockError::Poisoned(state)) => *state.into_inner() = Lifecycle::Destroyed,
+            Err(TryLockError::WouldBlock) => {}
+        }
+    }));
 }
 
-/// Resumes a paused instance.
+/// Pauses simulation, input, sound and rendering. `reason` (default `host`)
+/// is reported by the `paused` event.
 #[wasm_bindgen]
-pub fn resume() -> Result<(), JsError> {
-    send(Command::Resume)
+pub fn pause(reason: Option<String>) -> Result<(), JsError> {
+    send(Command::Pause(reason.unwrap_or_else(|| "host".into())))
+}
+
+/// Resumes a paused instance. `reason` (default `host`) is reported by the
+/// `resumed` event.
+#[wasm_bindgen]
+pub fn resume(reason: Option<String>) -> Result<(), JsError> {
+    send(Command::Resume(reason.unwrap_or_else(|| "host".into())))
 }
 
 /// Racks the balls again. Undoable. Free play only.
@@ -393,10 +435,15 @@ pub fn unlock_audio() -> Result<(), JsValue> {
 }
 
 /// Stops the game loop and releases the GPU surface. Idempotent.
+///
+/// The page counts as destroyed at once, so a [`mount`] that comes before
+/// the engine's last frame (a hidden tab runs none) already gets
+/// `RELOAD_REQUIRED`.
 #[wasm_bindgen]
 pub fn destroy() {
     if lifecycle() == Lifecycle::Mounted {
         let _ = send(Command::Destroy);
+        set_lifecycle(Lifecycle::Destroyed);
     }
 }
 
@@ -489,7 +536,7 @@ fn apply_commands(
     let commands: Vec<_> = lock(&INBOX).drain(..).collect();
     for command in commands {
         match command {
-            Command::Pause if !paused.0 => {
+            Command::Pause(reason) if !paused.0 => {
                 paused.0 = true;
                 let sleep = UpdateMode::reactive_low_power(Duration::MAX);
                 *settings = WinitSettings {
@@ -497,13 +544,13 @@ fn apply_commands(
                     unfocused_mode: sleep,
                 };
                 audio::set_running(false);
-                emit("paused", &JsValue::UNDEFINED);
+                emit("paused", &object(&[("reason", reason.into())]));
             }
-            Command::Resume if paused.0 => {
+            Command::Resume(reason) if paused.0 => {
                 paused.0 = false;
                 *settings = WinitSettings::game();
                 audio::set_running(true);
-                emit("resumed", &JsValue::UNDEFINED);
+                emit("resumed", &object(&[("reason", reason.into())]));
             }
             Command::Destroy => {
                 exit.write(AppExit::Success);
@@ -515,7 +562,7 @@ fn apply_commands(
             Command::Game(g) => {
                 game.write(g);
             }
-            Command::Pause | Command::Resume => {}
+            Command::Pause(_) | Command::Resume(_) => {}
         }
     }
 }
@@ -558,6 +605,17 @@ fn shot_summary(report: &ShotReport) -> JsValue {
     ])
 }
 
+/// Tells the wrapper which tier renders whenever it changes, in an internal
+/// `tier` event it does not pass on. The low tier also renders fewer pixels,
+/// which only the page can arrange (`render.pixelRatioCap`).
+fn report_tier(graphics: Res<Graphics>, mut reported: Local<Option<&'static str>>) {
+    let tier = graphics.tier.name();
+    if *reported != Some(tier) {
+        *reported = Some(tier);
+        emit("tier", &JsValue::from_str(tier));
+    }
+}
+
 /// Translates engine happenings into host events and sound.
 ///
 /// Per shot the host sees exactly one `shot-start` and one `shot-end`, with
@@ -578,11 +636,28 @@ fn emit_events(
         emit("ready", &JsValue::from_str(&version()));
     }
     // A very soft shot can start and finish within one frame, so a finished
-    // report also counts as the start of a shot.
+    // report also counts as the start of a shot. Then the rules have already
+    // ruled, and the shooter is the ruling's.
     let reports: Vec<&ShotReport> = finished.read().map(|f| &f.0).collect();
     if !*in_shot && (!sim.world.is_at_rest() || !reports.is_empty()) {
         *in_shot = true;
-        emit("shot-start", &JsValue::UNDEFINED);
+        let shot_id = reports.first().map_or(sim.world.shots(), |r| r.shot_id);
+        let shooter = mode
+            .eight_ball()
+            .map(|session| match (&session.last, reports.first()) {
+                (Some(ruling), Some(_)) => ruling.shooter,
+                _ => session.game.shooter(),
+            });
+        emit(
+            "shot-start",
+            &object(&[
+                ("shotId", shot_id.into()),
+                (
+                    "shooter",
+                    shooter.map_or(JsValue::NULL, |s| JsValue::from_str(s.name())),
+                ),
+            ]),
+        );
     }
     let mut voiced = 0;
     for Contact(event) in contacts.read() {

@@ -1,5 +1,7 @@
 //! Graphics quality profiles (spec §21.4). They change how the table looks,
-//! never how it plays: anti-aliasing and shadows only.
+//! never how it plays: anti-aliasing and shadows here, and on the web a
+//! lower resolution at [`Tier::Low`], which the page wrapper arranges
+//! (ADR-0013).
 //!
 //! `Auto` starts high and steps down, never up, when the frame rate stays
 //! low. It uses no telemetry, only the frame times it measures itself:
@@ -34,7 +36,7 @@ pub enum Quality {
     High,
     /// Anti-aliasing and coarser shadows.
     Medium,
-    /// No anti-aliasing and no shadows.
+    /// No anti-aliasing and no shadows; on the web, a lower resolution too.
     Low,
 }
 

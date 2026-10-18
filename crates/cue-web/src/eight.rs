@@ -223,7 +223,7 @@ fn ruling(r: &Ruling, called: Call) -> JsValue {
 
 /// The events one ruling produces, in the order a commentator would say
 /// them: the ruling itself, then a foul, groups, and who plays next or how
-/// the rack ended.
+/// the game (the rack) ended.
 pub(crate) fn ruling_events(
     session: &EightBall,
     r: &Ruling,
@@ -252,6 +252,7 @@ pub(crate) fn ruling_events(
             "turn-changed",
             object(&[
                 ("shooter", r.shooter.other().name().into()),
+                ("previous", r.shooter.name().into()),
                 ("inHand", in_hand.name().into()),
             ]),
         )),
@@ -267,7 +268,7 @@ pub(crate) fn ruling_events(
                 ),
                 ("score", score.into()),
             ]);
-            events.push(("rack-over", payload.clone()));
+            events.push(("game-over", payload.clone()));
             if session.match_over() {
                 events.push(("match-over", payload));
             }
