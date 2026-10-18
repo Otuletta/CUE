@@ -13,7 +13,7 @@ the code's licence (MIT or Apache-2.0).
 | Cue | Eight tapered sections, from the tip to the bumper | Generated from real cue dimensions | `crates/cue-game/src/cue_stick.rs` |
 | Ball mesh | UV sphere | Bevy primitive | `crates/cue-game/src/scene.rs` |
 | Impact sounds | Ball click, cushion thump, pocket drop, cue tip | Generated: modal synthesis | `crates/cue-audio/src/lib.rs` |
-| Game cues | Turn, foul and win cues | Generated: modal synthesis | `crates/cue-audio/src/lib.rs` |
+| Game cues | Foul and win cues (a turn cue exists but is not played) | Generated: modal synthesis | `crates/cue-audio/src/lib.rs` |
 | Interface icons | Toolbar icons | Hand-written SVG, drawn for CUE | `web/package/src/icons.js` |
 | Interface font | The system UI font | Not shipped: the browser's own | `web/package/src/styles.js` |
 

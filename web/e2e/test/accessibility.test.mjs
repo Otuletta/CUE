@@ -37,6 +37,13 @@ async function mounted(locale, options = {}) {
 
 /** Serious and critical axe findings on the page, as readable lines. */
 async function audit(page) {
+  // Dialogs fade in: judge what the player sees once they have settled.
+  await page.waitForFunction(() => {
+    const root = document.querySelector('#a .cue-overlay')?.shadowRoot ?? document;
+    return root
+      .getAnimations()
+      .every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity);
+  });
   const found = await page.evaluate(async () => {
     const result = await window.axe.run(document, { resultTypes: ['violations'] });
     return result.violations

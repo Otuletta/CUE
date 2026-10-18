@@ -59,7 +59,8 @@ impl Engine {
         })
     }
 
-    fn play(&self, sound: Sound, gain: f32, rate: f32) -> Result<(), JsValue> {
+    /// Plays `sound` `delay` seconds from now.
+    fn play(&self, sound: Sound, gain: f32, rate: f32, delay: f64) -> Result<(), JsValue> {
         let Some((_, buffers)) = self.clips.iter().find(|(s, _)| *s == sound) else {
             return Ok(());
         };
@@ -74,7 +75,7 @@ impl Engine {
         voice.gain().set_value(gain);
         source.connect_with_audio_node(&voice)?;
         voice.connect_with_audio_node(&self.master)?;
-        source.start()?;
+        source.start_with_when(self.ctx.current_time() + delay)?;
         Ok(())
     }
 }
@@ -124,10 +125,19 @@ pub(crate) fn set_running(running: bool) {
     });
 }
 
-/// Voices one simulation event, if it makes a sound. Returns whether it did.
-pub(crate) fn play_event(kind: &SimEventKind) -> bool {
+/// Voices one simulation event, if it makes a sound, as the `nth` sound of
+/// its frame. Returns whether it did.
+pub(crate) fn play_event(kind: &SimEventKind, nth: usize) -> bool {
     let Some((sound, gain, rate)) = voice(kind) else {
         return false;
+    };
+    let gain = gain * crowd(nth);
+    // A pocketed ball rolls on into the pocket before it drops (the drawing
+    // in `cue-game`); its clunk comes with the drop.
+    let delay = if sound == Sound::Pocket {
+        POCKET_DELAY
+    } else {
+        0.0
     };
     if !ENABLED.get() {
         return false;
@@ -135,46 +145,59 @@ pub(crate) fn play_event(kind: &SimEventKind) -> bool {
     ENGINE.with(|slot| {
         slot.borrow()
             .as_ref()
-            .is_some_and(|engine| engine.play(sound, gain, rate).is_ok())
+            .is_some_and(|engine| engine.play(sound, gain, rate, delay).is_ok())
     })
 }
 
-/// Plays one of the game cues (turn, foul, win), quietly: they mark the game,
+/// Plays one of the game cues (foul, win), quietly: they mark the game,
 /// they must not drown the table.
 pub(crate) fn play_cue(sound: Sound) {
-    const CUE_GAIN: f32 = 0.35;
+    const CUE_GAIN: f32 = 0.18;
     if !ENABLED.get() {
         return;
     }
     ENGINE.with(|slot| {
         if let Some(engine) = slot.borrow().as_ref() {
-            let _ = engine.play(sound, CUE_GAIN, 1.0);
+            let _ = engine.play(sound, CUE_GAIN, 1.0, 0.0);
         }
     });
 }
 
 /// Which clip an event plays, how loud and at what playback rate. Harder
 /// contacts are louder and very slightly higher; whispers are skipped.
+///
+/// The mix is a quiet room, not an arcade: only a hard break reaches full
+/// level, ordinary contacts sit well below it, and cushions, pockets and the
+/// tip stay in the background.
 pub(crate) fn voice(kind: &SimEventKind) -> Option<(Sound, f32, f32)> {
     let scaled = |speed: f64, full: f64, floor: f64| -> Option<(f32, f32)> {
         (speed >= floor).then(|| {
             let level = (speed / full).clamp(0.0, 1.0) as f32;
-            (level.powf(0.7), 0.97 + 0.06 * level)
+            (level.powf(0.9), 0.97 + 0.06 * level)
         })
     };
     match *kind {
         SimEventKind::BallBall { normal_speed, .. } => {
-            scaled(normal_speed, 4.0, 0.02).map(|(g, r)| (Sound::BallClick, g, r))
+            scaled(normal_speed, 6.0, 0.03).map(|(g, r)| (Sound::BallClick, 0.7 * g, r))
         }
         SimEventKind::Cushion { normal_speed, .. } => {
-            scaled(normal_speed, 3.0, 0.03).map(|(g, r)| (Sound::Cushion, 0.8 * g, r))
+            scaled(normal_speed, 4.0, 0.05).map(|(g, r)| (Sound::Cushion, 0.45 * g, r))
         }
         SimEventKind::Struck { speed } => {
-            scaled(speed, 8.0, 0.0).map(|(g, r)| (Sound::CueTip, 0.3 + 0.7 * g, r))
+            scaled(speed, 12.0, 0.0).map(|(g, r)| (Sound::CueTip, 0.15 + 0.4 * g, r))
         }
-        SimEventKind::Pocketed { .. } => Some((Sound::Pocket, 0.75, 1.0)),
+        SimEventKind::Pocketed { .. } => Some((Sound::Pocket, 0.4, 1.0)),
         SimEventKind::Transition { .. } | SimEventKind::CueCrossedHeadString => None,
     }
+}
+
+/// Seconds from a ball entering a pocket to the sound of its drop.
+const POCKET_DELAY: f64 = 0.2;
+
+/// How much quieter the `n`-th sound in one frame plays (from 0): a break's
+/// burst of clicks blends instead of piling up.
+pub(crate) fn crowd(n: usize) -> f32 {
+    1.0 / (1.0 + 0.45 * n as f32)
 }
 
 #[cfg(test)]
@@ -196,6 +219,10 @@ mod tests {
         assert!(hard.2 > soft.2);
         assert!(voice(&hit(0.001)).is_none());
         assert!(hard.1 <= 1.0);
+        // An ordinary contact sits well below full level.
+        assert!(voice(&hit(1.0)).unwrap().1 < 0.2);
+        // A burst in one frame gets quieter, never louder.
+        assert!((crowd(0) - 1.0).abs() < 1e-6 && crowd(3) < crowd(1) && crowd(5) > 0.0);
     }
 
     #[test]

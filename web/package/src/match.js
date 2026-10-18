@@ -95,6 +95,7 @@ export function sheetsMarkup(t, { rulesUrl }) {
 
   <div class="sheet" data-sheet="game" role="dialog" aria-modal="true" aria-labelledby="game-title" hidden>
     <div class="card">
+      <button type="button" class="x" data-action="close" aria-label="${escape(t.close)}">×</button>
       <h2 id="game-title">${escape(t.gameTitle)}</h2>
       <div class="menu"></div>
       <div class="actions"><button type="button" data-action="close">${escape(t.cancel)}</button></div>
@@ -114,6 +115,7 @@ export function sheetsMarkup(t, { rulesUrl }) {
 
   <div class="sheet" data-sheet="setup" role="dialog" aria-modal="true" aria-labelledby="setup-title" hidden>
     <form class="card" data-form="setup" novalidate>
+      <button type="button" class="x" data-action="close" aria-label="${escape(t.close)}">×</button>
       <h2 id="setup-title" tabindex="-1" autofocus>${escape(t.setupTitle)}</h2>
       <div class="names">
         ${[1, 2]
@@ -148,6 +150,7 @@ export function sheetsMarkup(t, { rulesUrl }) {
 
   <div class="sheet" data-sheet="call" role="dialog" aria-modal="true" aria-labelledby="call-title" hidden>
     <form class="card wide" data-form="call" novalidate>
+      <button type="button" class="x" data-action="close" aria-label="${escape(t.close)}">×</button>
       <h2 id="call-title">${escape(t.callTitle)}</h2>
       <fieldset class="call-balls"><legend>${escape(t.callBall)}</legend><div class="balls"></div></fieldset>
       <fieldset class="call-pockets"><legend>${escape(t.callPocket)}</legend><div class="pockets"></div></fieldset>
@@ -234,6 +237,7 @@ export function createMatch(shadow, deps) {
       const active = m.shooter === p.seat && m.stage !== 'over';
       el.toggleAttribute('data-active', active);
       el.querySelector('.name').textContent = nameOf(m, p.seat);
+      el.dataset.initial = [...nameOf(m, p.seat).trim()][0]?.toUpperCase() ?? '';
       // The player's balls, built once when the group is set; each one
       // dims, with a little pop, as it goes down.
       const group = el.querySelector('.group');

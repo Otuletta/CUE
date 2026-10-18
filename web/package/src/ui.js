@@ -45,6 +45,10 @@ export function createOverlay(root, deps) {
   const toastEl = $('.toast');
   const power = $('input[name="power"]');
   const powerOut = $('.power output');
+  // Sliders draw their gold fill from --fill. Set on the power label, it
+  // reaches the slider and the side gauge alike.
+  const paintRange = (input, host = input) =>
+    host.style.setProperty('--fill', `${((input.value - input.min) / (input.max - input.min)) * 100}%`);
   const spin = $('.spin');
   const jog = $('.jog');
   const dot = $('.spin .dot');
@@ -323,6 +327,7 @@ export function createOverlay(root, deps) {
   power.addEventListener('blur', () => (draggingPower = false));
   power.addEventListener('input', () => {
     powerOut.value = `${power.value}%`;
+    paintRange(power, power.parentElement);
     askedPower = Number(power.value) / 100;
     api.setPower(askedPower);
   });
@@ -434,6 +439,7 @@ export function createOverlay(root, deps) {
     for (const input of shadow.querySelectorAll('input[name="quality"]')) input.checked = input.value === s.quality;
     $('input[name="sound"]').checked = s.sound.enabled;
     $('input[name="volume"]').value = String(Math.round(s.sound.volume * 100));
+    paintRange($('input[name="volume"]'));
     ui.dataset.theme = s.theme;
   }
 
@@ -451,7 +457,10 @@ export function createOverlay(root, deps) {
     if (input.name === 'assists') settings.set({ ...s, assists: input.value });
     if (input.name === 'quality') settings.set({ ...s, quality: input.value });
     if (input.name === 'sound') settings.set({ ...s, sound: { ...s.sound, enabled: input.checked } });
-    if (input.name === 'volume') settings.set({ ...s, sound: { ...s.sound, volume: Number(input.value) / 100 } });
+    if (input.name === 'volume') {
+      paintRange(input);
+      settings.set({ ...s, sound: { ...s.sound, volume: Number(input.value) / 100 } });
+    }
     ui.dataset.theme = settings.get().theme;
     syncSound();
   });
@@ -476,6 +485,7 @@ export function createOverlay(root, deps) {
       const percent = Math.round(next.power * 100);
       power.value = String(percent);
       powerOut.value = `${percent}%`;
+      paintRange(power, power.parentElement);
     }
     if (changed('tipX') || changed('tipY')) {
       // Changed by the engine (WASD keys) or echoing our own change.
@@ -631,10 +641,15 @@ function markup(t, { exit, locale, rulesUrl }) {
         .map(([k, v]) => `<dt>${escape(k)}</dt><dd>${escape(v)}</dd>`)
         .join('')}</dl>`;
   const eightBall = t.eightBallHow.map((s) => `<li>${escape(s)}</li>`).join('');
+  // Themes show a swatch of their cloth and wood beside the name.
   const radios = (name, values) =>
     Object.entries(values)
-      .map(([value, label]) => `<label><input type="radio" name="${name}" value="${value}">${escape(label)}</label>`)
+      .map(([value, label]) => {
+        const swatch = name === 'theme' ? `<span class="swatch-theme" data-swatch="${value}" aria-hidden="true"></span>` : '';
+        return `<label><input type="radio" name="${name}" value="${value}">${swatch}${escape(label)}</label>`;
+      })
       .join('');
+  const closeX = `<button type="button" class="x" data-action="close" aria-label="${escape(t.close)}">×</button>`;
 
   return `
 <div class="ui" data-state="loading" lang="${locale}">
@@ -660,10 +675,12 @@ function markup(t, { exit, locale, rulesUrl }) {
 
   <div class="dock">
     ${dockMarkup(t)}
-    <div class="jog" role="slider" tabindex="0" aria-label="${escape(t.fineAim)}" aria-valuetext="${escape(t.fineAimHint)}" title="${escape(t.fineAim)}"><span class="ridges" aria-hidden="true"></span></div>
-    <div class="spin" role="slider" tabindex="0" aria-label="${escape(t.spin)}" aria-valuetext="${escape(t.spinValue(0, 0))}" title="${escape(t.spin)}"><span class="dot"></span></div>
-    <label class="power"><span>${escape(t.power)}</span><input type="range" name="power" min="0" max="100" step="1" value="0"><output>0%</output></label>
-    <button type="button" class="shoot" data-action="shoot">${escape(t.shoot)}</button>
+    <div class="controls">
+      <div class="jog" role="slider" tabindex="0" aria-label="${escape(t.fineAim)}" aria-valuetext="${escape(t.fineAimHint)}" title="${escape(t.fineAim)}"><span class="ridges" aria-hidden="true"></span></div>
+      <div class="spin" role="slider" tabindex="0" aria-label="${escape(t.spin)}" aria-valuetext="${escape(t.spinValue(0, 0))}" title="${escape(t.spin)}"><span class="dot"></span></div>
+      <label class="power"><span>${escape(t.power)}</span><span class="gauge" aria-hidden="true"><span class="fill"></span></span><input type="range" name="power" min="0" max="100" step="1" value="0"><output>0%</output></label>
+      <button type="button" class="shoot" data-action="shoot">${escape(t.shoot)}</button>
+    </div>
   </div>
 
   <div class="sheet bare" data-sheet="loading">
@@ -686,6 +703,7 @@ function markup(t, { exit, locale, rulesUrl }) {
 
   <div class="sheet" data-sheet="help" role="dialog" aria-modal="true" aria-labelledby="help-title" hidden>
     <div class="card">
+      ${closeX}
       <h2 id="help-title">${escape(t.howTitle)}</h2>
       <ol>${steps}</ol>
       <h3>${escape(t.eightBallTitle)}</h3>
@@ -697,13 +715,14 @@ function markup(t, { exit, locale, rulesUrl }) {
 
   <div class="sheet" data-sheet="settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" hidden>
     <div class="card">
+      ${closeX}
       <h2 id="settings-title">${escape(t.settingsTitle)}</h2>
       <fieldset><legend>${escape(t.theme)}</legend><div class="choices">${radios('theme', t.themes)}</div></fieldset>
       <fieldset><legend>${escape(t.assists)}</legend><div class="choices">${radios('assists', t.assistsLevels)}</div>
         <p class="note">${escape(t.assistsNote)}</p></fieldset>
       <fieldset><legend>${escape(t.quality)}</legend><div class="choices">${radios('quality', t.qualityLevels)}</div>
         <p class="note" data-note="quality">${escape(t.qualityNote)}</p></fieldset>
-      <div class="row"><label><input type="checkbox" name="sound"> ${escape(t.soundToggle)}</label></div>
+      <div class="row"><label><input type="checkbox" role="switch" name="sound"> ${escape(t.soundToggle)}</label></div>
       <div class="row"><label>${escape(t.volume)} <input type="range" name="volume" min="0" max="100" step="5"></label></div>
       <div class="actions">
         <button type="button" data-action="resetSettings">${escape(t.resetSettings)}</button>

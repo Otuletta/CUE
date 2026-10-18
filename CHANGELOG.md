@@ -9,6 +9,34 @@ the physics profile id, even when no signature changes.
 
 ## [Unreleased]
 
+### Changed: the look, the sound and the cue
+
+- **A premium control layer,** in the style of a dark club room:
+  - smoked glass with hairline edges, one champagne accent and serif
+    titles;
+  - every tool in one pill, and the cue controls in another, with a gold
+    Shoot;
+  - segmented controls with theme swatches, a sound switch, gold sliders
+    and a ticked power gauge at the side;
+  - player cards with an initial that turns gold on their turn;
+  - close buttons on dialogs, which fade in over a softly blurred table.
+
+  On narrow stages, choices stay on one row.
+- **A finer table:** a brass line inlaid along the rails, brass pocket lips,
+  and lacquered balls with a clear coat that carries sharp reflections.
+- **A calmer sound mix:**
+  - ordinary contacts sit well below a hard break;
+  - a burst of contacts in one frame blends instead of piling up;
+  - cushions, pockets and the tip stay in the background;
+  - a change of turn no longer plays a chime, and the foul and win cues
+    are quieter;
+  - the pocket's clunk comes as the ball drops.
+- **A subtler cue:** at full power it draws back 15 cm (was 22). It slides
+  back in from 12 cm (was 30) and follows through 3 cm (was 5).
+- **Pocketed balls roll in, then drop:** a ball carries on into the pocket
+  the way it was going, spinning, tips over the edge and falls out of
+  sight. Before, it sank on the spot in a third of a second.
+
 ### Changed: shot outcomes (physics profile `baseline-2`)
 
 - **Breaks open the rack.** Full power is now 12 m/s, a strong real
@@ -17,8 +45,10 @@ the physics profile id, even when no signature changes.
   now drives about 6 balls to a rail and pockets one most of the time,
   where before it drove about 4 and rarely pocketed anything
   (`docs/physics-model.md`, "The break").
-- The power slider's curve is `p²` instead of `p^1.6`, so soft and medium
-  shots keep their speeds.
+- **Full power is a break only on the break.** The break's full power is
+  12 m/s (slider curve `p²`). Every other shot tops out at a hard 7 m/s
+  (curve `p^1.6`): half power is 2.3 m/s, a quarter 0.76 m/s. At 12 m/s
+  any full-power shot ran into eight cushions.
 
 ### Added
 

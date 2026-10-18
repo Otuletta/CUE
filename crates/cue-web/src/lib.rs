@@ -680,7 +680,7 @@ fn emit_events(
     }
     let mut voiced = 0;
     for Contact(event) in contacts.read() {
-        if voiced < audio::MAX_PER_FRAME && audio::play_event(&event.kind) {
+        if voiced < audio::MAX_PER_FRAME && audio::play_event(&event.kind, voiced) {
             voiced += 1;
         }
         if let cue_physics::SimEventKind::Pocketed { ball, pocket } = event.kind {
@@ -719,13 +719,13 @@ fn emit_events(
                 if let Some(session) = mode.eight_ball()
                     && let Some(ruling) = &session.last
                 {
-                    // One cue per ruling: the end of a rack outranks a foul,
-                    // which outranks a plain change of turn.
+                    // One cue per ruling, and only when it matters: the end
+                    // of a rack, or a foul. A plain change of turn is shown,
+                    // not sounded.
                     let cue = match &ruling.next {
                         Next::Over(_) => Some(Sound::Win),
                         _ if !ruling.fouls.is_empty() => Some(Sound::Foul),
-                        Next::Pass { .. } | Next::Decide(_) => Some(Sound::Turn),
-                        Next::Continue => None,
+                        _ => None,
                     };
                     if let Some(cue) = cue {
                         audio::play_cue(cue);
