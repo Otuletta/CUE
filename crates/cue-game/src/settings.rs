@@ -5,7 +5,12 @@
 //! physics (spec §7.5, §21.4).
 
 use bevy::{gizmos::config::DefaultGizmoConfigGroup, prelude::*};
-use cue_core::glam::DVec2;
+use cue_core::{
+    glam::DVec2,
+    rules::eight_ball::{Call, Choice},
+};
+
+use crate::eight::GameSetup;
 
 /// How much the aiming guide shows. Every level is an *estimate*: it ignores
 /// spin, throw and curve (spec §10.5).
@@ -134,7 +139,7 @@ pub struct DevHud(pub bool);
 
 /// Requests from outside the canvas: the host page's controls, keyboard
 /// shortcuts handled by the page, tests. Applied at the start of a frame.
-#[derive(Message, Debug, Clone, Copy, PartialEq)]
+#[derive(Message, Debug, Clone, PartialEq)]
 pub enum GameCommand {
     /// Set the charged power, `0..=1`, as a slider would.
     SetPower(f64),
@@ -142,9 +147,9 @@ pub enum GameCommand {
     Shoot,
     /// Set the tip offset in ball radii; clamped to the miscue limit.
     SetTip(DVec2),
-    /// Undo the last shot or re-rack.
+    /// Undo the last shot or re-rack (free play only).
     Undo,
-    /// Rack the balls again.
+    /// Rack the balls again (free play only).
     Rerack,
     /// Change the visual theme.
     SetTheme(Theme),
@@ -152,6 +157,22 @@ pub enum GameCommand {
     SetAssists(Assists),
     /// Show or hide the developer overlay.
     ToggleDevHud,
+    /// Start a game of eight-ball.
+    NewGame(GameSetup),
+    /// Go back to free play.
+    FreePlay,
+    /// Eight-ball: call a ball and pocket, or a safety, for the next shot.
+    SetCall(Call),
+    /// Eight-ball: let the call follow the aim again.
+    AutoCall,
+    /// Eight-ball: resolve a pending decision.
+    Decide(Choice),
+    /// Eight-ball: start the next rack of the match.
+    NextRack,
+    /// Eight-ball: both players agree to a stalemate.
+    Stalemate,
+    /// Eight-ball: spot the legal ball nearest the head string (WPA 1.6).
+    SpotRequest,
 }
 
 /// Recolours the table when the theme changes.

@@ -15,7 +15,7 @@ use thiserror::Error;
 
 use crate::{
     BallState, Motion, PhysicsProfile, Strike,
-    geometry::{Cushion, Segment, TableGeometry},
+    geometry::{Cushion, Rail, Segment, TableGeometry},
     impact::{self, BallContact, CushionContact},
     motion::{self, Kinematics, Trajectory, planar},
     poly::Poly,
@@ -38,6 +38,11 @@ const REPORT_MIN_SPEED: f64 = 1e-3;
 /// How far behind a cushion line a ball may be, from rounding alone, and
 /// still count as touching it, metres.
 const CONTACT_TOLERANCE: f64 = 1e-9;
+
+/// A ball within this distance of a cushion, metres, is *frozen* to it (WPA
+/// 2.7), and leaves it once it gets farther than this away. Ten micrometres:
+/// a tenth of a sheet of paper, far below what a referee could see.
+const FROZEN_TOLERANCE: f64 = 1e-5;
 
 /// Upper bound on events processed by a single [`World::advance_to`] call.
 /// Real shots stay orders of magnitude below it; reaching it means a bug.
@@ -106,6 +111,11 @@ pub enum SimEventKind {
         ball: BallId,
         /// What it hit.
         cushion: Cushion,
+        /// The rail that part of the cushioning belongs to.
+        rail: Rail,
+        /// The ball was touching this rail when the shot began and has not
+        /// left it since (WPA 2.7).
+        frozen: bool,
         /// Horizontal speed into the cushion, m/s.
         normal_speed: f64,
     },
@@ -116,6 +126,10 @@ pub enum SimEventKind {
         /// The pocket.
         pocket: PocketId,
     },
+    /// The cue ball's centre crossed the head string, in either direction.
+    /// A sensor reading, not a contact: the motion is unchanged. The rules
+    /// need it for play from above the head string (WPA 3.11).
+    CueCrossedHeadString,
     /// A ball changed motion regime.
     Transition {
         /// The ball.
@@ -142,6 +156,7 @@ enum Scheduled {
     Vertex(usize, usize),
     Pocket(usize, usize),
     Pair(usize, usize),
+    HeadString,
 }
 
 /// The shot being recorded.
@@ -171,6 +186,11 @@ pub struct World {
     shots: u32,
     shot: Option<ShotLog>,
     report: Option<ShotReport>,
+    /// Which side of the head string the cue ball is on, for the sensor.
+    cue_above_head_string: bool,
+    /// Per ball, the rails it was frozen to when the shot began and has not
+    /// left since, as [`Rail::bit`] sets.
+    frozen: Vec<u8>,
 }
 
 impl World {
@@ -221,6 +241,8 @@ impl World {
             shots: 0,
             shot: None,
             report: None,
+            cue_above_head_string: false,
+            frozen: vec![0; layout.iter().count()],
         })
     }
 
@@ -280,6 +302,18 @@ impl World {
         cue.velocity = v;
         cue.angular_velocity = w;
         self.balls[i] = motion::settle(&cue, &self.k);
+        self.cue_above_head_string = self.profile.table.above_head_string(planar(cue.position));
+        let r = self.k.radius;
+        self.frozen = self
+            .balls
+            .iter()
+            .map(|s| match s.motion {
+                Motion::Pocketed => 0,
+                _ => self
+                    .geometry
+                    .touching(planar(s.position), r, FROZEN_TOLERANCE),
+            })
+            .collect();
 
         self.shots += 1;
         self.shot = Some(ShotLog {
@@ -354,6 +388,7 @@ impl World {
             if processed > MAX_EVENTS_PER_ADVANCE {
                 return Err(SimError::Stalled(processed, self.time));
             }
+            self.release_frozen(event.dt);
             for ball in &mut self.balls {
                 *ball = motion::evolve(ball, event.dt, &self.k);
             }
@@ -472,11 +507,18 @@ impl World {
                 Some(ShotEventKind::BallContact { a, b })
             }
             SimEventKind::Cushion {
-                ball, normal_speed, ..
-            } if normal_speed >= REPORT_MIN_SPEED => Some(ShotEventKind::Cushion { ball }),
+                ball,
+                rail,
+                frozen,
+                normal_speed,
+                ..
+            } if normal_speed >= REPORT_MIN_SPEED => {
+                Some(ShotEventKind::Cushion { ball, rail, frozen })
+            }
             SimEventKind::Pocketed { ball, pocket } => {
                 Some(ShotEventKind::Pocketed { ball, pocket })
             }
+            SimEventKind::CueCrossedHeadString => Some(ShotEventKind::CueCrossedHeadString),
             _ => None,
         };
         if let (Some(kind), Some(shot)) = (reported, self.shot.as_mut()) {
@@ -559,6 +601,25 @@ impl World {
             }
         }
 
+        // Head-string sensor for the cue ball. The polynomial is positive on
+        // the side the ball is on, so its falling root is the next crossing.
+        if let Some(c) = self.index(BallId::CUE)
+            && trajectories[c].is_moving()
+            && self.balls[c].motion != Motion::Pocketed
+        {
+            let t = &trajectories[c];
+            let side = if self.cue_above_head_string {
+                -1.0
+            } else {
+                1.0
+            };
+            let head = self.profile.table.head_string_x();
+            let gap = Poly::new(&[side * (t.c.x - head), side * t.b.x, side * t.a.x]);
+            if let Some(dt) = gap.first_falling_root(0.0, window(t.end, &best)) {
+                offer(dt, Scheduled::HeadString, &mut best);
+            }
+        }
+
         let contact = 2.0 * r;
         for (i, ti) in trajectories.iter().enumerate() {
             if self.balls[i].motion == Motion::Pocketed {
@@ -599,6 +660,8 @@ impl World {
                 self.push(SimEventKind::Cushion {
                     ball: self.ids[i],
                     cushion: segment.cushion,
+                    rail: segment.rail,
+                    frozen: self.frozen[i] & segment.rail.bit() != 0,
                     normal_speed,
                 });
             }
@@ -609,6 +672,8 @@ impl World {
                 self.push(SimEventKind::Cushion {
                     ball: self.ids[i],
                     cushion: vertex.cushion,
+                    rail: vertex.rail,
+                    frozen: self.frozen[i] & vertex.rail.bit() != 0,
                     normal_speed,
                 });
             }
@@ -630,6 +695,51 @@ impl World {
                     b: self.ids[j],
                     normal_speed,
                 });
+            }
+            Scheduled::HeadString => {
+                self.cue_above_head_string = !self.cue_above_head_string;
+                self.push(SimEventKind::CueCrossedHeadString);
+            }
+        }
+    }
+
+    /// Forgets the rails that frozen balls leave over the next `dt` seconds.
+    /// A ball has left a rail once its centre is more than
+    /// [`FROZEN_TOLERANCE`] farther from the rail's nose line than when
+    /// touching it. Between events the distance is a quadratic in time, so
+    /// its maximum is exact.
+    fn release_frozen(&mut self, dt: f64) {
+        let half = self.profile.table.half_extents();
+        let limit = self.k.radius + FROZEN_TOLERANCE;
+        for (i, set) in self.frozen.iter_mut().enumerate() {
+            if *set == 0 {
+                continue;
+            }
+            let t = motion::trajectory(&self.balls[i], &self.k);
+            if !t.is_moving() {
+                continue;
+            }
+            let held = *set;
+            for rail in Rail::ALL.into_iter().filter(|r| held & r.bit() != 0) {
+                // Distance from the nose line: `n·p + h`, with `n` pointing
+                // into the table.
+                let (n, h) = match rail {
+                    Rail::Head => (DVec2::X, half.x),
+                    Rail::Foot => (DVec2::NEG_X, half.x),
+                    Rail::Far => (DVec2::Y, half.y),
+                    Rail::Near => (DVec2::NEG_Y, half.y),
+                };
+                let (qa, qb, qc) = (n.dot(t.a), n.dot(t.b), n.dot(t.c) + h);
+                let at = |s: f64| qa * s * s + qb * s + qc;
+                let vertex = if qa < 0.0 { -qb / (2.0 * qa) } else { f64::NAN };
+                let farthest = [0.0, dt, vertex]
+                    .into_iter()
+                    .filter(|s| (0.0..=dt).contains(s))
+                    .map(at)
+                    .fold(f64::NEG_INFINITY, f64::max);
+                if farthest > limit {
+                    *set &= !rail.bit();
+                }
             }
         }
     }

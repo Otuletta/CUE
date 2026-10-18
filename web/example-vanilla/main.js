@@ -44,6 +44,7 @@ async function start() {
     game = await createCue({
       container: stage,
       fallbackUrl: 'https://github.com/Otuletta/CUE',
+      rulesUrl: 'https://github.com/Otuletta/CUE/blob/main/docs/rules-eight-ball.md',
       // An SPA would route away here. ADR-0006: pause and hide instead of
       // destroying, so coming back is instant.
       onExit: () => {
@@ -82,6 +83,21 @@ async function start() {
   game.on('settings-change', (s) =>
     log(`settings ${s.theme} · ${s.assists} · sound ${s.sound.enabled ? 'on' : 'off'}`),
   );
+  // Eight-ball: the referee's side of the API.
+  game.on('new-game', ({ mode }) => log(`new-game ${mode}`));
+  game.on('ruling', (r) => {
+    const call = r.call.kind === 'ball' ? `${r.call.ball}→${r.call.pocket}` : r.call.kind;
+    const fouls = r.fouls.length ? ` fouls [${r.fouls.join(', ')}]` : '';
+    log(`ruling ${r.shooter}: call ${call}, pocketed [${r.pocketed.join(', ')}]${fouls} → ${r.next}`);
+  });
+  game.on('groups-assigned', ({ seat, group }) => log(`groups-assigned ${seat} ${group}`));
+  game.on('decision-required', (d) => log(`decision-required ${d.situation}: ${d.chooser} [${d.options.join(', ')}]`));
+  game.on('decided', (d) => log(`decided ${d.choice} → ${d.shooter} (${d.inHand})`));
+  game.on('rack-over', (o) => log(`rack-over ${o.winner}${o.loss ? ` (${o.loss})` : ''} ${o.score.join('–')}`));
+  game.on('match-over', (o) => log(`match-over ${o.winner} ${o.score.join('–')}`));
+  game.on('ball-spotted', ({ ballId }) => log(`ball-spotted ${ballId}`));
+  game.on('shot-refused', ({ reason }) => log(`shot-refused ${reason}`));
+  game.on('call-refused', ({ reason }) => log(`call-refused ${reason}`));
   $('destroy').disabled = false;
   stage.querySelector('canvas')?.focus();
 }

@@ -20,22 +20,10 @@
 
 use std::f64::consts::FRAC_1_SQRT_2;
 
+pub use cue_core::Rail;
 use cue_core::{PocketId, PocketSpec, TableSpec, glam::DVec2};
 
 use crate::SimError;
-
-/// One of the four rails.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Rail {
-    /// Short rail behind the head string (`−X`).
-    Head,
-    /// Short rail behind the rack (`+X`).
-    Foot,
-    /// Long rail at `−Z`.
-    Far,
-    /// Long rail at `+Z`.
-    Near,
-}
 
 /// Which part of the cushioning a contact was with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -58,6 +46,8 @@ pub struct Segment {
     pub normal: DVec2,
     /// What this segment belongs to.
     pub cushion: Cushion,
+    /// The rail it is part of; a facing belongs to the rail it is cut into.
+    pub rail: Rail,
 }
 
 impl Segment {
@@ -79,6 +69,8 @@ pub struct Vertex {
     pub at: DVec2,
     /// What this vertex belongs to.
     pub cushion: Cushion,
+    /// The rail it is part of.
+    pub rail: Rail,
 }
 
 /// A pocket's drop region and mouth.
@@ -138,21 +130,31 @@ impl TableGeometry {
         };
 
         for f in &pockets {
-            for &(jaw, end) in &f.facings {
+            for (index, &(jaw, end)) in f.facings.iter().enumerate() {
                 let along = (end - jaw).normalize();
                 let mut normal = along.perp();
                 if normal.dot(f.pocket.centre - jaw) < 0.0 {
                     normal = -normal;
                 }
                 let cushion = Cushion::Jaw(f.pocket.id);
+                let rail = facing_rail(f.pocket.id, index);
                 geometry.segments.push(Segment {
                     a: jaw,
                     b: end,
                     normal,
                     cushion,
+                    rail,
                 });
-                geometry.vertices.push(Vertex { at: jaw, cushion });
-                geometry.vertices.push(Vertex { at: end, cushion });
+                geometry.vertices.push(Vertex {
+                    at: jaw,
+                    cushion,
+                    rail,
+                });
+                geometry.vertices.push(Vertex {
+                    at: end,
+                    cushion,
+                    rail,
+                });
                 if end.distance(f.pocket.centre) > f.pocket.radius {
                     return Err(SimError::InvalidLayout(format!(
                         "the {} pocket's throat is wider than its drop region",
@@ -226,6 +228,7 @@ impl TableGeometry {
                 b,
                 normal,
                 cushion: Cushion::Rail(rail),
+                rail,
             });
             geometry.outlines.push([a, b, end_at(b), end_at(a)]);
         }
@@ -266,6 +269,24 @@ impl TableGeometry {
     /// centre beyond it has escaped the table.
     pub fn outer_half_extents(&self) -> DVec2 {
         self.outer
+    }
+
+    /// The rails a ball of radius `r` centred at `p` is touching, to within
+    /// `tolerance` metres: those it is *frozen* to (WPA 2.7). As a bit set of
+    /// [`Rail::bit`].
+    pub fn touching(&self, p: DVec2, r: f64, tolerance: f64) -> u8 {
+        let segments = self.segments.iter().filter_map(|s| {
+            let along = (p - s.a).dot(s.direction());
+            let gap = (p - s.a).dot(s.normal) - r;
+            ((0.0..=s.length()).contains(&along) && gap.abs() <= tolerance).then_some(s.rail)
+        });
+        let vertices = self
+            .vertices
+            .iter()
+            .filter_map(|v| (p.distance(v.at) - r <= tolerance).then_some(v.rail));
+        segments
+            .chain(vertices)
+            .fold(0, |set, rail| set | rail.bit())
     }
 
     /// Deepest overlap of a ball of radius `r` at `p` with any cushion, as
@@ -348,6 +369,18 @@ fn side(spec: &TableSpec, id: PocketId) -> Facings {
 fn signs(id: PocketId) -> (f64, f64) {
     let (x, z) = id.signs();
     (f64::from(x), f64::from(z))
+}
+
+/// The rail a pocket facing is cut into. Facing 0 of a corner is on the long
+/// rail and 1 on the short rail; both side facings are on the long rail.
+fn facing_rail(id: PocketId, index: usize) -> Rail {
+    let (x, z) = id.signs();
+    let long = if z < 0 { Rail::Far } else { Rail::Near };
+    match (id.is_corner(), index, x < 0) {
+        (true, 1, true) => Rail::Head,
+        (true, 1, false) => Rail::Foot,
+        _ => long,
+    }
 }
 
 #[cfg(test)]
@@ -451,6 +484,37 @@ mod tests {
         let jaw = g.pocket(PocketId::SideNear).jaws[1];
         let (cushion, _) = g.penetration(jaw, r).unwrap();
         assert_eq!(cushion, Cushion::Jaw(PocketId::SideNear));
+    }
+
+    #[test]
+    fn every_cushion_part_belongs_to_the_rail_it_is_cut_into() {
+        let (spec, g) = geometry();
+        let r = spec.ball.radius;
+        let half = spec.half_extents();
+        for s in g.segments() {
+            if let Cushion::Rail(rail) = s.cushion {
+                assert_eq!(s.rail, rail);
+            }
+        }
+        // A corner's two facings: one on each rail it joins.
+        let corner: Vec<Rail> = g
+            .segments()
+            .iter()
+            .filter(|s| s.cushion == Cushion::Jaw(PocketId::HeadFar))
+            .map(|s| s.rail)
+            .collect();
+        assert_eq!(corner, vec![Rail::Far, Rail::Head]);
+        assert!(
+            g.segments()
+                .iter()
+                .filter(|s| s.cushion == Cushion::Jaw(PocketId::SideNear))
+                .all(|s| s.rail == Rail::Near)
+        );
+        // Frozen to the foot rail, to two rails in a corner, to none.
+        let foot = DVec2::new(half.x - r, 0.1);
+        assert_eq!(g.touching(foot, r, 1e-5), Rail::Foot.bit());
+        assert_eq!(g.touching(foot - DVec2::new(1e-4, 0.0), r, 1e-5), 0);
+        assert_eq!(g.touching(DVec2::ZERO, r, 1e-5), 0);
     }
 
     #[test]

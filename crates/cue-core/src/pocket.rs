@@ -61,6 +61,11 @@ impl PocketId {
             Self::FootNear => "foot-near",
         }
     }
+
+    /// Parses a name from [`PocketId::name`].
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.name() == name)
+    }
 }
 
 impl fmt::Display for PocketId {
@@ -96,10 +101,14 @@ mod tests {
     }
 
     #[test]
-    fn names_are_unique() {
+    fn names_are_unique_and_round_trip() {
         let mut names: Vec<_> = PocketId::ALL.iter().map(|p| p.name()).collect();
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), 6);
+        for p in PocketId::ALL {
+            assert_eq!(PocketId::parse(p.name()), Some(p));
+        }
+        assert_eq!(PocketId::parse("middle"), None);
     }
 }

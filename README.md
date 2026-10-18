@@ -12,11 +12,11 @@ CUE has two parts that ship together:
 - **A library** that other sites can embed with one call and a container
   element. Embedding it does not require knowing Rust or Bevy.
 
-> **Status: Phase 3, free play.** A complete free-play experience in the
-> browser: six pockets, ball in hand, undo, aiming guide levels, three
-> themes, procedural sound and accessible controls in English and Spanish.
-> Eight-ball rules come next. This README describes only what exists; see the
-> [roadmap](#roadmap).
+> **Status: Phase 4, local eight-ball.** Two players on one device, with
+> WPA or casual rules: a rules engine with a test for every rule in scope,
+> called shots, decisions after the break, fouls and ball in hand, and
+> matches with alternating breaks. Free play works as before. This README
+> describes only what exists; see the [roadmap](#roadmap).
 
 ## What works today
 
@@ -37,9 +37,24 @@ CUE has two parts that ship together:
     the rail drops in the corner, a shot at the point bounces out, and side
     pockets reject shallow angles. See [ADR-0007](docs/adr/0007-cushion-and-pocket-model.md).
 - **Shot reports:** every shot produces an immutable `ShotReport` for the
-  rules. It records first contact, pocketed balls, scratches and cushion
-  contacts.
-- **Browser build:** ≈ 4.1 MiB Brotli for the engine plus ≈ 14 KiB for the control layer (6.7 MiB gzip as GitHub Pages serves it), 120 FPS on the reference desktop,
+  rules. It records first contact, pocketed balls, scratches, rail contacts
+  (marking frozen balls, WPA 2.7) and the cue ball's head-string crossings
+  (WPA 3.11).
+- **Eight-ball rules engine:** a pure state machine over shot reports, with
+  no engine and no physics. It covers WPA 8-Ball (*Rules of Play*, effective
+  2025-09-15): the break and its options, the open table, called shots and
+  safeties, standard fouls with ball in hand, losing the rack, spotting,
+  stalemates and alternating breaks. A test per rule (38 cases) checks it
+  without a GPU. [rules-eight-ball.md](docs/rules-eight-ball.md) goes through
+  the WPA text rule by rule: implemented, not applicable to digital play, or
+  adapted, with each of CUE's adjudications. See
+  [ADR-0010](docs/adr/0010-eight-ball-rules-and-call-shot.md).
+- **Two-player eight-ball:** match setup (names that are never stored, rules,
+  race length, who breaks) and a scoreboard. The call is proposed from the
+  aim, drawn on the table and editable in an accessible dialog. Decisions
+  and rack results appear in panels that keep the table visible, and every
+  ruling is announced in one sentence.
+- **Browser build:** ≈ 4.2 MiB Brotli for the engine plus ≈ 27 KiB for the control layer, eight-ball included (6.8 MiB gzip as GitHub Pages serves it), 120 FPS on the reference desktop,
   first frame under a second after clicking Play. Pausing stops the engine
   completely (0 frames). See the [measurements](docs/benchmarks/phase-1-web.md).
 - **Accessible controls:** an HTML layer in a shadow root over the canvas
@@ -57,13 +72,22 @@ CUE has two parts that ship together:
 - **Embedding API:** `createCue({ container })` returns an instance with:
   - lifecycle: `pause`, `resume`, `destroy`;
   - table: `rerack`, `undo`, `shoot`, `setPower`, `setTip`;
+  - eight-ball: `newGame({ ruleset, breaker, raceTo, names })`, `freePlay`,
+    `callBall`, `callSafety`, `autoCall`, `decide`, `nextRack`, `stalemate`,
+    `spotRequest`;
   - preferences: `setTheme`, `setAssists`, `setAudio`;
-  - state and display: `getState`, `enterFullscreen`, `on(event)`.
+  - state and display: `getState` (including the match: players, groups,
+    score, shooter, stage, call, decision), `enterFullscreen`, `on(event)`.
 
   Events: `ready`, `shot-start`, `ball-pocketed`, `shot-end` (with a shot
   summary), `racked`, `undo`, `paused`, `resumed`, `settings-change`,
-  `fullscreen-change`, `destroyed`, `error`. Loading shows real progress from a
-  build manifest. The vanilla example uses no framework.
+  `fullscreen-change`, `destroyed`, `error`. In a match the referee also
+  reports `new-game`, `ruling`, `foul`, `groups-assigned`, `turn-changed`,
+  `decision-required`, `decided`, `rack-over`, `match-over`, `ball-spotted`,
+  `shot-refused` and `call-refused`. Every name in these events (fouls,
+  options, pockets) is a stable code, ready for the host to translate.
+  Loading shows real progress from a build manifest. The vanilla example
+  uses no framework.
 
 ## Why it is built this way
 
@@ -83,9 +107,9 @@ host page ──▶ cue-web ──▶ cue-game ──▶ cue-physics ──▶ c
 
 | Crate | Responsibility | Depends on Bevy? |
 |-------|----------------|:----------------:|
-| [`cue-core`](crates/cue-core) | Ball and pocket identity, WPA table spec, racks, deterministic RNG, `ShotReport`; later rulesets | no |
+| [`cue-core`](crates/cue-core) | Ball, pocket and rail identity, WPA table spec, racks, deterministic RNG, `ShotReport`, eight-ball rules | no |
 | [`cue-physics`](crates/cue-physics) | Event-driven solver: motion regimes, cushion and pocket geometry, contact models, strikes, versioned profiles | no |
-| [`cue-game`](crates/cue-game) | Bevy app: scene, procedural ball textures, aiming, camera, HUD | yes |
+| [`cue-game`](crates/cue-game) | Bevy app: scene, procedural ball textures, aiming, camera, HUD, free play and eight-ball sessions | yes |
 | [`cue-audio`](crates/cue-audio) | Procedural modal synthesis of the impact sounds | no |
 | [`cue-web`](crates/cue-web) | WASM boundary: lifecycle, commands, state snapshot, events, Web Audio playback | yes |
 | [`web/package`](web/package) | `createCue()` ES module wrapper and the accessible control layer | — |
@@ -130,8 +154,8 @@ in [docs/controls.md](docs/controls.md).
 | 0 ✓ | Skeleton, CI, first ADRs | `cargo check` and `cargo test` pass on a clean install |
 | 1 ✓ | Vertical slice in the browser | A simple table with a controllable shot in WASM, plus real size and FPS measurements |
 | 2 ✓ | Billiards engine | Critical physics cases pass; the solver produces a `ShotReport` |
-| **3** | Free Play | A first-time visitor can shoot, understand the result, reset and leave |
-| 4 | Local eight-ball | Every rule transition in scope is covered by tests |
+| 3 | Free Play (built; [usability test](docs/usability-test.md) in progress) | A first-time visitor can shoot, understand the result, reset and leave |
+| **4** | Local eight-ball (in review) | Every rule transition in scope is covered by tests |
 | 5 | Visuals, audio, polish | Approved on the device matrix with no physics regressions |
 | 6 | Open-source 1.0 | An outside developer can embed CUE using only the public docs |
 

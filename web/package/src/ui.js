@@ -10,6 +10,7 @@
 
 import { formatList } from './i18n.js';
 import { ICONS } from './icons.js';
+import { boardMarkup, createMatch, dockMarkup, sheetsMarkup } from './match.js';
 import { STYLES } from './styles.js';
 
 const TOAST_MS = 2600;
@@ -25,12 +26,12 @@ const escape = (s) =>
  * @param {object} deps
  */
 export function createOverlay(root, deps) {
-  const { t, locale, api, settings, onExit, fallbackUrl } = deps;
+  const { t, locale, api, settings, onExit, fallbackUrl, rulesUrl } = deps;
   const host = document.createElement('div');
   host.className = 'cue-overlay';
   Object.assign(host.style, { position: 'absolute', inset: '0', pointerEvents: 'none' });
   const shadow = host.attachShadow({ mode: 'open' });
-  shadow.innerHTML = `<style>${STYLES}</style>${markup(t, { exit: Boolean(onExit), locale })}`;
+  shadow.innerHTML = `<style>${STYLES}</style>${markup(t, { exit: Boolean(onExit), locale, rulesUrl })}`;
   root.appendChild(host);
 
   const $ = (selector) => shadow.querySelector(selector);
@@ -62,6 +63,9 @@ export function createOverlay(root, deps) {
     live.textContent = '';
     requestAnimationFrame(() => (live.textContent = message));
     if (!visual) return;
+    // Just below the top bar, however many rows it wraps to.
+    const top = $('.top').getBoundingClientRect().bottom - ui.getBoundingClientRect().top;
+    if (top > 0) toastEl.style.top = `${Math.round(top + 8)}px`;
     toastEl.textContent = message;
     toastEl.setAttribute('data-visible', '');
     clearTimeout(toastTimer);
@@ -70,7 +74,8 @@ export function createOverlay(root, deps) {
 
   // --- Sheets and focus ---------------------------------------------------
 
-  const background = () => [$('.top'), $('.dock')];
+  const background = () => [$('.top'), $('.dock'), $('.panels')];
+  const canvas = () => root.querySelector('canvas');
 
   function open(name) {
     if (openSheet === name) return;
@@ -93,7 +98,10 @@ export function createOverlay(root, deps) {
     background().forEach((el) => (el.inert = false));
     if (name === 'help') deps.onTutorialDone?.();
     if (name === 'paused') api.resume();
-    if (restore) (returnFocus?.isConnected ? returnFocus : root.querySelector('canvas'))?.focus?.();
+    if (!restore) return;
+    // The control that opened the sheet may have gone (a panel that closed).
+    const back = returnFocus?.isConnected && returnFocus.checkVisibility?.() !== false ? returnFocus : canvas();
+    back?.focus?.({ preventScroll: true });
   }
 
   // Keep Tab inside an open dialog.
@@ -138,14 +146,22 @@ export function createOverlay(root, deps) {
     api.shoot();
   }
 
+  const match = createMatch(shadow, {
+    t,
+    locale,
+    api,
+    root,
+    open,
+    close,
+    announce,
+    openSheet: () => openSheet,
+    focusTable: () => canvas()?.focus({ preventScroll: true }),
+  });
+
   const actions = {
+    ...match.actions,
     help: () => open('help'),
     undo: () => api.undo(),
-    rack: () => open('confirm'),
-    confirmRack: () => {
-      close();
-      api.rerack();
-    },
     sound: toggleSound,
     settings: () => open('settings'),
     fullscreen: () => (fullscreen ? api.exitFullscreen() : api.enterFullscreen()),
@@ -163,10 +179,11 @@ export function createOverlay(root, deps) {
   };
 
   shadow.addEventListener('click', (e) => {
-    const action = e.target.closest?.('[data-action]')?.dataset.action;
-    if (action && actions[action]) {
+    const el = e.target.closest?.('[data-action]');
+    const action = el?.dataset.action;
+    if (action && actions[action] && !el.disabled) {
       e.preventDefault();
-      actions[action]();
+      actions[action](el);
     }
   });
 
@@ -181,9 +198,10 @@ export function createOverlay(root, deps) {
       return;
     }
     const target = e.composedPath?.()[0];
-    if (target?.matches?.('input[type="range"]')) return;
+    // Typing a name, or moving a slider, is not a shortcut.
+    if (target?.matches?.('input[type="range"], input[type="text"]')) return;
     const key = e.key.toLowerCase();
-    const map = { h: 'help', '?': 'help', p: 'pause', m: 'sound', f: 'fullscreen', n: 'rack', o: 'settings' };
+    const map = { h: 'help', '?': 'help', p: 'pause', m: 'sound', f: 'fullscreen', n: 'game', o: 'settings' };
     if (map[key] && ui.dataset.state === 'ready' && (!openSheet || map[key] === 'pause')) {
       actions[map[key]]();
       e.preventDefault();
@@ -306,10 +324,13 @@ export function createOverlay(root, deps) {
       drawSpin(tip.x, tip.y);
     }
 
-    const left = next.ballsInPlay.filter((n) => n !== 0).length;
-    const detail = next.inHand ? t.inHand : next.atRest ? t.ballsLeft(left) : t.rolling;
-    const detailEl = $('.status .detail');
-    if (detailEl.textContent !== detail) detailEl.textContent = detail;
+    if (!next.eightBall) {
+      const left = next.ballsInPlay.filter((n) => n !== 0).length;
+      const detail = next.inHand ? t.inHand : next.atRest ? t.ballsLeft(left) : t.rolling;
+      const detailEl = $('.status .detail');
+      if (detailEl.textContent !== detail) detailEl.textContent = detail;
+    }
+    match.update(next);
   }
 
   function loop() {
@@ -366,6 +387,7 @@ export function createOverlay(root, deps) {
     },
     /** Reacts to engine events with feedback a player can see and hear. */
     onEvent(name, detail) {
+      if (match.onEvent(name, detail)) return;
       if (name === 'shot-end' && detail && !detail.abandoned) {
         const balls = detail.pocketed.filter((p) => p.ballId !== 0).map((p) => t.ball(p.ballId));
         if (detail.cueBallPocketed) announce(t.scratch);
@@ -391,12 +413,13 @@ export function createOverlay(root, deps) {
       cancelAnimationFrame(raf);
       clearTimeout(toastTimer);
       root.removeEventListener('keydown', onKey);
+      match.destroy();
       host.remove();
     },
   };
 }
 
-function markup(t, { exit, locale }) {
+function markup(t, { exit, locale, rulesUrl }) {
   const icon = (action, label, svg, extra = '') =>
     `<button type="button" class="icon" data-action="${action}" aria-label="${escape(label)}" title="${escape(label)}" ${extra}>${svg}</button>`;
   const steps = (coarsePointer() ? t.howTouch : t.howPointer).map((s) => `<li>${escape(s)}</li>`).join('');
@@ -405,6 +428,7 @@ function markup(t, { exit, locale }) {
     : `<h3>${escape(t.shortcutsTitle)}</h3><dl>${t.shortcuts
         .map(([k, v]) => `<dt>${escape(k)}</dt><dd>${escape(v)}</dd>`)
         .join('')}</dl>`;
+  const eightBall = t.eightBallHow.map((s) => `<li>${escape(s)}</li>`).join('');
   const radios = (name, values) =>
     Object.entries(values)
       .map(([value, label]) => `<label><input type="radio" name="${name}" value="${value}">${escape(label)}</label>`)
@@ -414,10 +438,11 @@ function markup(t, { exit, locale }) {
 <div class="ui" data-state="loading" lang="${locale}">
   <div class="top">
     <p class="status"><span class="mode">${escape(t.freePlay)}</span><span class="detail"></span></p>
+    ${boardMarkup(t)}
     <div class="toolbar" role="toolbar" aria-label="${escape(t.toolbar)}">
       ${icon('help', t.help, ICONS.help)}
       ${icon('undo', t.undo, ICONS.undo, 'disabled')}
-      ${icon('rack', t.newRack, ICONS.rack)}
+      ${icon('game', t.newGame, ICONS.rack, 'aria-haspopup="dialog"')}
       ${icon('sound', t.sound, ICONS.soundOn, 'aria-pressed="true"')}
       ${icon('settings', t.settings, ICONS.settings)}
       ${icon('fullscreen', t.fullscreen, ICONS.fullscreen)}
@@ -430,6 +455,7 @@ function markup(t, { exit, locale }) {
   <div class="sr" role="status" aria-live="polite"></div>
 
   <div class="dock">
+    ${dockMarkup(t)}
     <div class="spin" role="slider" tabindex="0" aria-label="${escape(t.spin)}" aria-valuetext="${escape(t.spinValue(0, 0))}" title="${escape(t.spin)}"><span class="dot"></span></div>
     <label class="power"><span>${escape(t.power)}</span><input type="range" name="power" min="0" max="100" step="1" value="0"><output>0%</output></label>
     <button type="button" class="shoot" data-action="shoot">${escape(t.shoot)}</button>
@@ -457,6 +483,8 @@ function markup(t, { exit, locale }) {
     <div class="card">
       <h2 id="help-title">${escape(t.howTitle)}</h2>
       <ol>${steps}</ol>
+      <h3>${escape(t.eightBallTitle)}</h3>
+      <ul>${eightBall}</ul>
       ${shortcuts}
       <div class="actions"><button type="button" class="primary" data-action="close" autofocus>${escape(t.done)}</button></div>
     </div>
@@ -477,22 +505,12 @@ function markup(t, { exit, locale }) {
     </div>
   </div>
 
-  <div class="sheet" data-sheet="confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>
-    <div class="card">
-      <h2 id="confirm-title">${escape(t.confirmRackTitle)}</h2>
-      <p>${escape(t.confirmRackBody)}</p>
-      <div class="actions">
-        <button type="button" data-action="close" autofocus>${escape(t.cancel)}</button>
-        <button type="button" class="primary" data-action="confirmRack">${escape(t.confirmRack)}</button>
-      </div>
-    </div>
-  </div>
-
   <div class="sheet" data-sheet="paused" role="dialog" aria-modal="true" aria-labelledby="paused-title" hidden>
     <div class="card">
       <h2 id="paused-title">${escape(t.pausedTitle)}</h2>
       <div class="actions"><button type="button" class="primary" data-action="resume" autofocus>${escape(t.resume)}</button></div>
     </div>
   </div>
+  ${sheetsMarkup(t, { rulesUrl })}
 </div>`;
 }

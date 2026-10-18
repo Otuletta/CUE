@@ -14,18 +14,21 @@
 //! Every gesture has a non-pointer equivalent, so the game is playable from
 //! the keyboard alone or from the host's accessible controls: arrows aim and
 //! set power, `Space` shoots, `W`/`A`/`S`/`D` move the tip, `I`/`J`/`K`/`L` move
-//! a cue ball in hand, `U` undoes, `R` re-racks.
+//! a cue ball in hand, `U` undoes, `R` re-racks (free play only: eight-ball
+//! has no undo).
 
 use bevy::{input::touch::Touches, prelude::*, window::PrimaryWindow};
 use cue_core::{
     BallId,
     glam::{DVec2, DVec3},
+    rules::eight_ball::Call,
 };
 use cue_physics::{MAX_TIP_OFFSET, Motion, Strike};
 
 use crate::{
+    eight::{self, Mode},
     settings::{Assists, DevHud, GameCommand, Theme},
-    sim::{GameEvent, Paused, Simulation},
+    sim::{GameEvent, HandRegion, Paused, Simulation},
 };
 
 /// Drag distance on the table, in metres, that maps to full power.
@@ -131,31 +134,60 @@ fn table_point(
 }
 
 /// Shoots with the current aim. Refuses soft "shots" below
-/// [`MIN_SHOT_POWER`].
-fn fire(sim: &mut Simulation, aim: &mut Aim) {
+/// [`MIN_SHOT_POWER`] and, in eight-ball, shots the rules cannot take yet.
+fn fire(
+    sim: &mut Simulation,
+    aim: &mut Aim,
+    mode: &mut Mode,
+    events: &mut MessageWriter<GameEvent>,
+) {
     if aim.power < MIN_SHOT_POWER {
         return;
     }
+    let before = match mode {
+        Mode::FreePlay => None,
+        Mode::EightBall(session) => {
+            // The call follows the aim up to the moment of the shot.
+            if !session.manual_call {
+                session.call = eight::auto_call(session, sim, aim.direction);
+            }
+            if let Err(why) = session.can_shoot() {
+                events.write(GameEvent::ShotRefused(why));
+                return;
+            }
+            Some(sim.layout())
+        }
+    };
     let strike = Strike {
         direction: aim.direction,
         power: aim.power.powf(POWER_EXPONENT),
         tip_offset: aim.tip,
     };
     match sim.strike(strike) {
-        Ok(()) => aim.power = 0.0,
+        Ok(()) => {
+            aim.power = 0.0;
+            if let (Mode::EightBall(session), Some(before)) = (mode, before) {
+                session.begin_shot(before);
+                // Eight-ball has no undo.
+                sim.clear_undo();
+            }
+        }
         Err(e) => warn!("strike rejected: {e}"),
     }
 }
 
-fn undo(sim: &mut Simulation, aim: &mut Aim, events: &mut MessageWriter<GameEvent>) {
-    if sim.undo() {
+fn undo(sim: &mut Simulation, aim: &mut Aim, mode: &Mode, events: &mut MessageWriter<GameEvent>) {
+    if matches!(mode, Mode::FreePlay) && sim.undo() {
         aim.gesture = None;
         aim.power = 0.0;
         events.write(GameEvent::Undone);
     }
 }
 
-fn rerack(sim: &mut Simulation, aim: &mut Aim, events: &mut MessageWriter<GameEvent>) {
+fn rerack(sim: &mut Simulation, aim: &mut Aim, mode: &Mode, events: &mut MessageWriter<GameEvent>) {
+    if !matches!(mode, Mode::FreePlay) {
+        return;
+    }
     sim.rerack();
     *aim = Aim {
         tip: aim.tip,
@@ -171,25 +203,38 @@ pub(crate) fn apply_commands(
     paused: Res<Paused>,
     mut sim: ResMut<Simulation>,
     mut aim: ResMut<Aim>,
+    mut mode: ResMut<Mode>,
     mut theme: ResMut<Theme>,
     mut assists: ResMut<Assists>,
     mut dev: ResMut<DevHud>,
     mut events: MessageWriter<GameEvent>,
 ) {
     for command in commands.read() {
-        match *command {
-            GameCommand::SetTheme(t) if *theme != t => *theme = t,
-            GameCommand::SetAssists(a) if *assists != a => *assists = a,
+        match command {
+            GameCommand::SetTheme(t) if *theme != *t => *theme = *t,
+            GameCommand::SetAssists(a) if *assists != *a => *assists = *a,
             GameCommand::ToggleDevHud => dev.0 = !dev.0,
-            GameCommand::SetTip(t) if t.is_finite() => aim.tip = t.clamp_length_max(MAX_TIP_OFFSET),
+            GameCommand::SetTip(t) if t.is_finite() => {
+                aim.tip = t.clamp_length_max(MAX_TIP_OFFSET);
+            }
+            // A new game or rack (set up by `eight::apply_commands`, paused or
+            // not) starts with a fresh aim.
+            GameCommand::NewGame(_) | GameCommand::FreePlay | GameCommand::NextRack => {
+                *aim = Aim {
+                    tip: aim.tip,
+                    ..Aim::default()
+                };
+            }
             // Everything below acts on the table, which a paused game must not.
             _ if paused.0 => {}
             GameCommand::SetPower(p) if p.is_finite() && sim.world.is_at_rest() => {
                 aim.power = p.clamp(0.0, 1.0);
             }
-            GameCommand::Shoot if sim.world.is_at_rest() => fire(&mut sim, &mut aim),
-            GameCommand::Undo => undo(&mut sim, &mut aim, &mut events),
-            GameCommand::Rerack => rerack(&mut sim, &mut aim, &mut events),
+            GameCommand::Shoot if sim.world.is_at_rest() => {
+                fire(&mut sim, &mut aim, &mut mode, &mut events);
+            }
+            GameCommand::Undo => undo(&mut sim, &mut aim, &mode, &mut events),
+            GameCommand::Rerack => rerack(&mut sim, &mut aim, &mode, &mut events),
             _ => {}
         }
     }
@@ -206,6 +251,7 @@ pub(crate) fn read_input(
     paused: Res<Paused>,
     mut sim: ResMut<Simulation>,
     mut aim: ResMut<Aim>,
+    mut mode: ResMut<Mode>,
     mut dev: ResMut<DevHud>,
     mut events: MessageWriter<GameEvent>,
 ) {
@@ -223,17 +269,22 @@ pub(crate) fn read_input(
         KeyCode::SuperRight,
     ]);
     if keys.just_pressed(KeyCode::KeyU) || (control && keys.just_pressed(KeyCode::KeyZ)) {
-        undo(&mut sim, &mut aim, &mut events);
+        undo(&mut sim, &mut aim, &mode, &mut events);
         return;
     }
-    if keys.just_pressed(KeyCode::KeyR) && !control {
-        rerack(&mut sim, &mut aim, &mut events);
+    if keys.just_pressed(KeyCode::KeyR) && !control && matches!(*mode, Mode::FreePlay) {
+        rerack(&mut sim, &mut aim, &mode, &mut events);
         return;
     }
     let Some(cue) = sim.cue_position().filter(|_| sim.world.is_at_rest()) else {
         aim.gesture = None;
         return;
     };
+    // Nothing to aim at while players decide or after the rack.
+    if mode.eight_ball().is_some_and(|s| !s.accepts_shot()) {
+        aim.gesture = None;
+        return;
+    }
     let (Ok(window), Ok((camera, camera_transform))) = (window.single(), camera.single()) else {
         return;
     };
@@ -310,7 +361,7 @@ pub(crate) fn read_input(
             }
             if released {
                 aim.gesture = None;
-                fire(&mut sim, &mut aim);
+                fire(&mut sim, &mut aim, &mut mode, &mut events);
                 aim.power = 0.0;
                 return;
             }
@@ -363,14 +414,19 @@ pub(crate) fn read_input(
         }
     }
     if keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::Enter) {
-        fire(&mut sim, &mut aim);
+        fire(&mut sim, &mut aim, &mut mode, &mut events);
     }
 }
 
-/// Places the cue stick and draws the aiming guide.
+/// Places the cue stick and draws the aiming guide, plus what the rules need
+/// the player to see: the head string while the cue ball must stay above it,
+/// and the called ball and pocket. Those are rules, not assists, so they show
+/// at every assist level.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_aim(
     sim: Res<Simulation>,
     aim: Res<Aim>,
+    mode: Res<Mode>,
     assists: Res<Assists>,
     theme: Res<Theme>,
     mut gizmos: Gizmos,
@@ -379,7 +435,11 @@ pub(crate) fn draw_aim(
     let Ok((mut transform, mut visibility)) = stick.single_mut() else {
         return;
     };
-    let Some(cue) = sim.cue_position().filter(|_| sim.world.is_at_rest()) else {
+    let Some(cue) = sim
+        .cue_position()
+        .filter(|_| sim.world.is_at_rest())
+        .filter(|_| mode.eight_ball().is_none_or(|s| s.accepts_shot()))
+    else {
         *visibility = Visibility::Hidden;
         return;
     };
@@ -388,6 +448,25 @@ pub(crate) fn draw_aim(
     let at = |p: DVec2| DVec3::new(p.x, r, p.y).as_vec3();
     let flat = |p: Vec3| Isometry3d::new(p, Quat::from_rotation_arc(Vec3::Z, Vec3::Y));
     let centre = at(cue);
+
+    if sim.hand_region() == Some(HandRegion::AboveHeadString) {
+        draw_head_string(&sim, &mut gizmos, palette.guide);
+    }
+    if let Some(session) = mode.eight_ball()
+        && let Call::Ball { ball, pocket } = session.effective_call()
+    {
+        if let Some(s) = sim
+            .world
+            .state(ball)
+            .filter(|s| s.motion != Motion::Pocketed)
+        {
+            let p = DVec2::new(s.position.x, s.position.z);
+            gizmos.circle(flat(at(p)), (1.3 * r) as f32, palette.guide_accent);
+        }
+        let mouth = sim.world.geometry().pocket(pocket);
+        let on_cloth = DVec3::new(mouth.centre.x, 0.002, mouth.centre.y).as_vec3();
+        gizmos.circle(flat(on_cloth), mouth.radius as f32, palette.guide_accent);
+    }
 
     if sim.in_hand() {
         // A ring marks the cue ball as movable; red while the drag is over
@@ -418,11 +497,11 @@ pub(crate) fn draw_aim(
         return;
     }
     // Guide: line to the first ball or cushion, and a ghost ball there.
-    let (end, hit) = first_contact(&sim, cue, aim.direction);
+    let Target { end, object, .. } = first_contact(&sim, cue, aim.direction);
     gizmos.line(centre, at(end), palette.guide);
     gizmos.circle(flat(at(end)), r as f32, palette.guide);
     if *assists == Assists::Assisted
-        && let Some(object) = hit
+        && let Some(object) = object
     {
         // Object ball leaves along the line of centres; a stun cue ball
         // leaves along the tangent, on the side it was not pushed to.
@@ -433,11 +512,35 @@ pub(crate) fn draw_aim(
     }
 }
 
+/// A dashed line across the cloth at the head string.
+fn draw_head_string(sim: &Simulation, gizmos: &mut Gizmos, colour: Color) {
+    const DASH: f64 = 0.03;
+    let table = sim.table();
+    let x = table.head_string_x();
+    let half = table.half_extents().y;
+    let on_cloth = |z: f64| DVec3::new(x, 0.002, z).as_vec3();
+    let mut z = -half;
+    while z < half {
+        gizmos.line(on_cloth(z), on_cloth((z + DASH).min(half)), colour);
+        z += 2.0 * DASH;
+    }
+}
+
+/// What the cue ball would meet first travelling straight from where it is.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Target {
+    /// The cue-ball centre at contact (a ghost ball).
+    pub(crate) end: DVec2,
+    /// The struck ball's centre, if it meets a ball before a cushion.
+    pub(crate) object: Option<DVec2>,
+    /// The struck ball, if any.
+    pub(crate) ball: Option<BallId>,
+}
+
 /// Where the cue ball would first touch something if it travelled straight.
-/// Returns the cue-ball centre at contact and the struck ball's centre.
 ///
 /// This is an assist, not a prediction: it ignores spin, curve and throw.
-fn first_contact(sim: &Simulation, from: DVec2, dir: DVec2) -> (DVec2, Option<DVec2>) {
+pub(crate) fn first_contact(sim: &Simulation, from: DVec2, dir: DVec2) -> Target {
     let r = sim.table().ball.radius;
     let limit = sim.table().half_extents() - DVec2::splat(r);
     let wall = [
@@ -464,9 +567,13 @@ fn first_contact(sim: &Simulation, from: DVec2, dir: DVec2) -> (DVec2, Option<DV
         if disc >= 0.0 {
             let t = -b - disc.sqrt();
             if t > 0.0 && t < best.0 {
-                best = (t, Some(p));
+                best = (t, Some((id, p)));
             }
         }
     }
-    (from + dir * best.0.min(10.0), best.1)
+    Target {
+        end: from + dir * best.0.min(10.0),
+        object: best.1.map(|(_, p)| p),
+        ball: best.1.map(|(id, _)| id),
+    }
 }

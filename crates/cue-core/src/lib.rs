@@ -19,14 +19,17 @@ mod ball;
 mod error;
 mod pocket;
 mod rack;
+mod rail;
 mod report;
 mod rng;
+pub mod rules;
 mod table;
 
 pub use ball::{BallGroup, BallId};
 pub use error::CoreError;
 pub use pocket::{PocketId, PocketSpec};
 pub use rack::{Layout, RACK_GAP, eight_ball_rack};
+pub use rail::Rail;
 pub use report::{SIMULTANEOUS, ShotEvent, ShotEventKind, ShotReport};
 pub use rng::SplitMix64;
 pub use table::{BallSpec, TableSpec};

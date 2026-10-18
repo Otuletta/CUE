@@ -15,10 +15,11 @@ one.
 | [0007](0007-cushion-and-pocket-model.md) | Cushion, pocket and contact models | accepted |
 | [0008](0008-controls-and-accessible-overlay.md) | Controls and the accessible control layer | accepted (power mechanic provisional) |
 | [0009](0009-procedural-audio.md) | Procedural audio | accepted |
+| [0010](0010-eight-ball-rules-and-call-shot.md) | Eight-ball rules engine, profiles and call-shot interface | accepted |
 
-Open decisions (camera, power mechanic, call-shot UI, and
-others) are listed in §31 of the [specification](../specification.es.md) and
-get an ADR when they are resolved.
+Open decisions (camera, power mechanic and others) are listed in §31 of the
+[specification](../specification.es.md) and get an ADR when they are
+resolved.
 
 ## Template
 

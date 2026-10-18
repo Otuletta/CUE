@@ -5,7 +5,9 @@
 //! the bottom only move data between the world and the ECS.
 
 use bevy::prelude::*;
-use cue_core::{BallId, ShotReport, TableSpec, eight_ball_rack, glam::DVec2};
+use cue_core::{
+    BallId, Layout, ShotReport, TableSpec, eight_ball_rack, glam::DVec2, rules::eight_ball::Choice,
+};
 use cue_physics::{Motion, PhysicsProfile, SimError, SimEvent, Strike, World};
 
 /// Longest slice of wall-clock time fed to the simulation in one frame.
@@ -39,6 +41,26 @@ pub enum GameEvent {
     },
     /// The last shot (or re-rack) was undone.
     Undone,
+    /// A new game started (free play or eight-ball).
+    NewGame,
+    /// Eight-ball: the rules ruled on a shot; details are in the session.
+    Ruled,
+    /// Eight-ball: a pending decision was resolved.
+    Decided {
+        /// The option chosen.
+        choice: Choice,
+    },
+    /// Eight-ball: a ball was put back on the table (WPA 1.5, 1.6).
+    Spotted {
+        /// The ball spotted.
+        ball: BallId,
+    },
+    /// A shot was refused before it was taken, with a stable code saying why
+    /// (see [`EightBall::can_shoot`](crate::EightBall::can_shoot)).
+    ShotRefused(&'static str),
+    /// Eight-ball: a call was refused, with the
+    /// [`CallError`](cue_core::rules::eight_ball::CallError) name.
+    CallRefused(&'static str),
 }
 
 /// The report of the most recent shot, for the HUD.
@@ -49,12 +71,21 @@ pub struct LastShot(pub Option<ShotReport>);
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Ball(pub BallId);
 
+/// Where a cue ball in hand may be placed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandRegion {
+    /// Anywhere on the playing surface.
+    Anywhere,
+    /// Only above (behind) the head string.
+    AboveHeadString,
+}
+
 /// Everything needed to put the table back as it was.
 #[derive(Debug, Clone)]
 struct Saved {
     world: World,
     rack_seed: u64,
-    in_hand: bool,
+    in_hand: Option<HandRegion>,
 }
 
 /// The physics world plus the clock that drives it.
@@ -66,18 +97,19 @@ pub struct Simulation {
     /// part of the current trajectory already shown on screen.
     pub clock: f64,
     rack_seed: u64,
-    in_hand: bool,
+    in_hand: Option<HandRegion>,
     undo: Option<Box<Saved>>,
 }
 
 impl Simulation {
-    /// A fresh eight-ball rack drawn from `seed`, with the cue ball in hand.
+    /// A fresh eight-ball rack drawn from `seed`, with the cue ball in hand
+    /// anywhere (free play).
     pub fn new(seed: u64) -> Self {
         Self {
             world: Self::racked_world(seed),
             clock: 0.0,
             rack_seed: seed,
-            in_hand: true,
+            in_hand: Some(HandRegion::Anywhere),
             undo: None,
         }
     }
@@ -103,9 +135,70 @@ impl Simulation {
     }
 
     /// Whether the player may move the cue ball before the next shot: at the
-    /// start of a rack and after a scratch.
+    /// start of a rack and after a scratch or foul.
     pub fn in_hand(&self) -> bool {
-        self.in_hand && self.world.is_at_rest()
+        self.hand_region().is_some()
+    }
+
+    /// Where the cue ball in hand may go, if it is in hand right now.
+    pub fn hand_region(&self) -> Option<HandRegion> {
+        self.in_hand.filter(|_| self.world.is_at_rest())
+    }
+
+    /// Positions of every ball in play at the current instant, as the rules
+    /// see the table before a shot.
+    pub fn layout(&self) -> Layout {
+        self.world
+            .sample(self.clock)
+            .filter(|(_, s)| s.motion != Motion::Pocketed)
+            .map(|(id, s)| (id, DVec2::new(s.position.x, s.position.z)))
+            .collect()
+    }
+
+    /// Racks fifteen fresh balls with the cue ball in hand in `region`, and
+    /// forgets the undo history (used to start games and racks).
+    pub fn new_rack(&mut self, region: HandRegion) {
+        self.next_rack();
+        self.in_hand = Some(region);
+        self.undo = None;
+    }
+
+    /// Forgets the undo history (eight-ball does not allow undo).
+    pub fn clear_undo(&mut self) {
+        self.undo = None;
+    }
+
+    /// Puts the cue ball in hand in `region`, or with `None` takes it out of
+    /// hand without moving it (a pocketed cue ball stays off the table while a
+    /// decision is pending or the rack is over). A cue ball in hand that is
+    /// pocketed or outside its region is moved to the nearest free spot: the
+    /// break spot above the head string, the head spot otherwise.
+    pub fn give_cue_ball(&mut self, region: Option<HandRegion>) {
+        self.in_hand = region;
+        let Some(region) = region else {
+            return;
+        };
+        let table = *self.table();
+        let preferred = match region {
+            HandRegion::AboveHeadString => table.break_spot(),
+            HandRegion::Anywhere => table.head_spot(),
+        };
+        let misplaced = match (self.cue_position(), region) {
+            (None, _) => true,
+            (Some(p), HandRegion::AboveHeadString) => !table.above_head_string(p),
+            (Some(_), HandRegion::Anywhere) => false,
+        };
+        if misplaced
+            && let Some(spot) = self.world.nearest_free_spot(BallId::CUE, preferred)
+            && let Err(e) = self.world.place(BallId::CUE, spot)
+        {
+            warn!("could not place the cue ball: {e}");
+        }
+    }
+
+    /// Puts a (possibly pocketed) ball back on the table at `at`.
+    pub fn spot_ball(&mut self, ball: BallId, at: DVec2) -> Result<(), SimError> {
+        self.world.place(ball, at)
     }
 
     /// Whether there is a shot or re-rack to undo.
@@ -128,7 +221,7 @@ impl Simulation {
         self.undo = Some(before);
         // The shot starts at the world's time; drop any presentation lag.
         self.clock = self.world.time();
-        self.in_hand = false;
+        self.in_hand = None;
         Ok(())
     }
 
@@ -142,7 +235,7 @@ impl Simulation {
         self.rack_seed = self.rack_seed.wrapping_add(1);
         self.world = Self::racked_world(self.rack_seed);
         self.clock = 0.0;
-        self.in_hand = true;
+        self.in_hand = Some(HandRegion::Anywhere);
     }
 
     /// Puts the table back as it was before the last shot or re-rack, even if
@@ -158,12 +251,15 @@ impl Simulation {
         true
     }
 
-    /// Moves the cue ball while it is in hand.
+    /// Moves the cue ball while it is in hand, within its region.
     pub fn place_cue(&mut self, at: DVec2) -> Result<(), SimError> {
-        if !self.in_hand() {
-            return Err(SimError::InvalidPlacement("the cue ball is not in hand"));
+        match self.hand_region() {
+            None => Err(SimError::InvalidPlacement("the cue ball is not in hand")),
+            Some(HandRegion::AboveHeadString) if !self.table().above_head_string(at) => Err(
+                SimError::InvalidPlacement("the cue ball must stay above the head string"),
+            ),
+            Some(_) => self.world.place(BallId::CUE, at),
         }
-        self.world.place(BallId::CUE, at)
     }
 
     /// Free-play housekeeping once a shot has finished. Returns `Some(true)`
@@ -180,7 +276,9 @@ impl Simulation {
         if report.cue_ball_pocketed() {
             let head = self.table().head_spot();
             match self.world.nearest_free_spot(BallId::CUE, head) {
-                Some(spot) if self.world.place(BallId::CUE, spot).is_ok() => self.in_hand = true,
+                Some(spot) if self.world.place(BallId::CUE, spot).is_ok() => {
+                    self.in_hand = Some(HandRegion::Anywhere);
+                }
                 _ => {
                     self.next_rack();
                     return Some(true);
@@ -220,13 +318,17 @@ pub(crate) fn advance(
 /// Applies free-play rules after each shot.
 pub(crate) fn after_shot(
     mut finished: MessageReader<ShotFinished>,
+    mode: Res<crate::eight::Mode>,
     mut sim: ResMut<Simulation>,
     mut last: ResMut<LastShot>,
     mut events: MessageWriter<GameEvent>,
 ) {
     for ShotFinished(report) in finished.read() {
         last.0 = Some(report.clone());
-        if let Some(cleared) = sim.after_shot(report) {
+        // Eight-ball has its own rules for what happens next.
+        if matches!(*mode, crate::eight::Mode::FreePlay)
+            && let Some(cleared) = sim.after_shot(report)
+        {
             events.write(GameEvent::Racked { cleared });
         }
     }
