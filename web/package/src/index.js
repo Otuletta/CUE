@@ -49,7 +49,7 @@ const EVENTS = new Set([
   'turn-changed',
   'decision-required',
   'decided',
-  'rack-over',
+  'game-over',
   'match-over',
   'ball-spotted',
   'shot-refused',
@@ -57,9 +57,58 @@ const EVENTS = new Set([
 ]);
 
 const RULESETS = new Set(['eight-ball-wpa', 'eight-ball-casual']);
+const BREAKERS = new Set(['a', 'b', 'random']);
+
+/** Throws for a match setup the engine would refuse. */
+function checkMatch({ ruleset = 'eight-ball-wpa', breaker = 'random' } = {}) {
+  if (!RULESETS.has(ruleset)) throw new TypeError(`newGame: unknown ruleset "${ruleset}"`);
+  if (!BREAKERS.has(String(breaker))) throw new TypeError(`newGame: unknown breaker "${breaker}"`);
+}
+
+/** Safe, plain descriptions for `error` events: no paths, stacks or host data. */
+const ERROR_MESSAGES = {
+  UNSUPPORTED_BROWSER: 'This browser cannot run CUE: it needs WebAssembly and WebGL 2.',
+  LOAD_FAILED: 'The game engine could not be downloaded or started.',
+  RELOAD_REQUIRED: 'CUE was closed on this page. Reload the page to start it again.',
+  ENGINE_FAILED: 'The game engine stopped after an internal error. Reload the page to play again.',
+  CONTEXT_LOST: 'The browser stopped the graphics. Reload the page to play again.',
+};
+
+/** Pixels per CSS pixel at most: the default `render.pixelRatioCap`. */
+const PIXEL_RATIO_CAP = 2;
+/** The low quality tier renders at most this many, whatever the cap. */
+const LOW_TIER_PIXEL_RATIO = 1.5;
+
+/** Errors after which the instance cannot go on: only a reload helps. */
+const FATAL = new Set(['ENGINE_FAILED', 'CONTEXT_LOST']);
+
+/** `{ code, message }` for an error whose message is a code. */
+function describeError(error) {
+  const code = String(error?.message ?? error);
+  const key = code.split(':')[0];
+  return { code, message: ERROR_MESSAGES[key] ?? 'CUE could not start.' };
+}
+
+/** The rejection for a cancelled load: code `ABORTED`, named like a DOM abort. */
+function abortError(signal) {
+  const error = new Error('ABORTED', { cause: signal.reason });
+  error.name = 'AbortError';
+  return error;
+}
+
+const isSignal = (value) =>
+  typeof value?.aborted === 'boolean' && typeof value.addEventListener === 'function';
+
+/** A reason given for pausing or resuming: a short word, `host` by default. */
+const reasonOf = (reason) => (typeof reason === 'string' && reason ? reason.slice(0, 32) : 'host');
+
 const MODES = new Set(['free-play', 'eight-ball-local']);
 
+// The page's one instance, or a token for the `createCue` call loading it.
 let live = null;
+// An instance was destroyed on this page: the engine cannot start again
+// before a reload (ADR-0006), so later calls fail fast without downloading.
+let spent = false;
 
 /**
  * Mounts CUE inside `container`.
@@ -82,15 +131,47 @@ let live = null;
  *   `reducedMotion` overrides the device setting; `highContrast` picks the contrast theme.
  * @param {string|URL} [options.assetBase]  Where `manifest.json` and `pkg/` are served, when
  *   not next to this module (a CDN, or a copy in the host's public folder).
+ * @param {AbortSignal} [options.signal]  Cancels the load: rejects with `ABORTED`.
+ * @param {{pixelRatioCap?: number}} [options.render]  `pixelRatioCap`: pixels rendered per
+ *   CSS pixel at most (default 2), on screens denser than that.
  * @returns {Promise<object>} Resolves once the first frame has run.
  */
 export async function createCue(options = {}) {
-  const { container, ui = true, persist = true, onExit, fallbackUrl, rulesUrl } = options;
+  // Every option is checked before CUE claims the page's one instance.
+  const { container, signal } = options;
   if (!(container instanceof HTMLElement)) {
     throw new TypeError('createCue: `container` must be an HTMLElement');
   }
+  if (signal != null && !isSignal(signal)) {
+    throw new TypeError('createCue: `signal` must be an AbortSignal');
+  }
+  if (options.mode && !MODES.has(options.mode)) {
+    throw new TypeError(`createCue: unknown mode "${options.mode}"`);
+  }
+  if (options.mode === 'eight-ball-local') checkMatch(options.match);
+  const cap = options.render?.pixelRatioCap ?? PIXEL_RATIO_CAP;
+  if (!(typeof cap === 'number' && cap >= 0.5)) {
+    throw new TypeError('createCue: `render.pixelRatioCap` must be a number of at least 0.5');
+  }
   if (live) throw new Error('INSTANCE_ALREADY_MOUNTED');
-  live = {};
+  if (signal?.aborted) throw abortError(signal);
+  const claim = {};
+  live = claim;
+  try {
+    return await mount(options, claim);
+  } finally {
+    // An error before the instance existed must not keep the page's slot.
+    if (live === claim) live = null;
+  }
+}
+
+/** The body of `createCue`, once `claim` holds the page's instance slot. */
+async function mount(options, claim) {
+  const { container, ui = true, persist = true, onExit, fallbackUrl, rulesUrl, signal } = options;
+  const pixelRatioCap = options.render?.pixelRatioCap ?? PIXEL_RATIO_CAP;
+  // Who holds the slot: `claim`, then the instance once it exists.
+  let owner = claim;
+  let instance = null;
 
   const locale = resolveLocale(options.locale);
   const t = strings(locale);
@@ -102,9 +183,6 @@ export async function createCue(options = {}) {
     ...(options.assists && { assists: options.assists }),
     ...(options.quality && { quality: options.quality }),
   });
-  if (options.mode && !MODES.has(options.mode)) {
-    throw new TypeError(`createCue: unknown mode "${options.mode}"`);
-  }
   if (options.audio) {
     settings = sanitize({ ...settings, sound: { ...settings.sound, ...options.audio } });
   }
@@ -134,6 +212,17 @@ export async function createCue(options = {}) {
     height: '100%',
     overflow: 'hidden',
   });
+  // The canvas sits in a frame that sets how many pixels it renders
+  // (`applyResolution`).
+  const frame = document.createElement('div');
+  Object.assign(frame.style, {
+    position: 'absolute',
+    left: '0',
+    top: '0',
+    width: '100%',
+    height: '100%',
+    transformOrigin: '0 0',
+  });
   const canvas = document.createElement('canvas');
   canvas.id = `cue-canvas-${Math.random().toString(36).slice(2, 10)}`;
   canvas.tabIndex = 0;
@@ -145,11 +234,17 @@ export async function createCue(options = {}) {
     touchAction: 'none',
     outline: 'none',
   });
-  root.appendChild(canvas);
+  frame.appendChild(canvas);
+  root.appendChild(frame);
   container.appendChild(root);
 
   let wasm = null;
   let destroyed = false;
+  // Set by a fatal error: the instance stays, quiet and harmless, until
+  // destroyed. `engineFailed`: the engine itself stopped and can take no
+  // more commands.
+  let failed = false;
+  let engineFailed = false;
   let teardown = null;
   const fs = fullscreenController(root, (on) => {
     overlay?.setFullscreen(on);
@@ -161,9 +256,43 @@ export async function createCue(options = {}) {
   const motionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
   const applyMotion = () => {
     const reduced = access.reducedMotion ?? Boolean(motionQuery?.matches);
-    if (wasm && !destroyed) wasm.setReducedMotion(reduced);
+    if (wasm && !destroyed && !failed) wasm.setReducedMotion(reduced);
   };
   motionQuery?.addEventListener?.('change', applyMotion);
+
+  // Insets the host or the controls asked for, in visible CSS pixels.
+  let insets = [0, 0];
+  // The canvas's CSS size over the visible size: 1, or less past the cap.
+  let resolution = 1;
+  const sendInsets = () => {
+    if (wasm && !destroyed && !failed) wasm.setViewInsets(insets[0] * resolution, insets[1] * resolution);
+  };
+
+  // Renders at most `pixelRatioCap` pixels per CSS pixel, and fewer at the
+  // low tier (spec §21.4). Past the cap the canvas gets a smaller CSS box, so
+  // the browser sizes its drawing buffer to the cap times the visible box,
+  // and a transform scales it back up. Pointer input still lands right: the
+  // engine reads it in the canvas's own, untransformed, coordinates.
+  let tier = null;
+  let ratioQuery = null;
+  const applyResolution = () => {
+    const ratio = window.devicePixelRatio || 1;
+    // Follow the ratio when the window moves to another screen or zooms.
+    ratioQuery?.removeEventListener('change', applyResolution);
+    ratioQuery = window.matchMedia?.(`(resolution: ${ratio}dppx)`) ?? null;
+    ratioQuery?.addEventListener('change', applyResolution);
+    const cap = Math.min(pixelRatioCap, tier === 'low' ? LOW_TIER_PIXEL_RATIO : Infinity);
+    const next = Math.min(1, cap / ratio);
+    if (next === resolution) return;
+    resolution = next;
+    Object.assign(frame.style, {
+      width: `${next * 100}%`,
+      height: `${next * 100}%`,
+      transform: next < 1 ? `scale(${1 / next})` : '',
+    });
+    sendInsets();
+  };
+  applyResolution();
 
   const applySettings = () => {
     if (!wasm) return;
@@ -174,24 +303,50 @@ export async function createCue(options = {}) {
     applyMotion();
   };
 
+  // After a fatal error, methods do nothing rather than throw, so a host's
+  // own code (a router hiding CUE, say) keeps working.
   const guard =
     (fn) =>
     (...args) => {
       if (destroyed) throw new Error('INSTANCE_DESTROYED');
-      return fn(...args);
+      if (failed) return undefined;
+      try {
+        return fn(...args);
+      } catch (err) {
+        if (failed) return undefined; // the engine failed in this very call
+        throw err;
+      }
     };
 
+  // A fatal error reported by the engine, or found by the wrapper.
+  const stop = (code) => {
+    if (failed || destroyed) return;
+    failed = true;
+    engineFailed = code === 'ENGINE_FAILED';
+    try {
+      wasm?.pause('error');
+    } catch {
+      // The engine is gone; there is nothing left to pause.
+    }
+    overlay?.showMessage('stopped');
+    emit('error', describeError(new Error(code)));
+  };
+  // The browser can drop the WebGL context (a GPU reset, too many tabs). The
+  // renderer cannot rebuild its resources, so this ends the instance.
+  const onContextLost = () => stop('CONTEXT_LOST');
+  canvas.addEventListener('webglcontextlost', onContextLost);
+
   const api = {
-    pause: guard(() => wasm?.pause()),
-    resume: guard(() => wasm?.resume()),
+    pause: guard((reason) => wasm?.pause(reasonOf(reason))),
+    resume: guard((reason) => wasm?.resume(reasonOf(reason))),
     rerack: guard(() => wasm?.rerack()),
     undo: guard(() => wasm?.undo()),
     shoot: guard(() => wasm?.shoot()),
     setPower: guard((p) => wasm?.setPower(Number(p))),
     setTip: guard((x, y) => wasm?.setTip(Number(x), Number(y))),
     newGame: guard((setup = {}) => {
+      checkMatch(setup);
       const { ruleset = 'eight-ball-wpa', breaker = 'random', raceTo = 1, names = [] } = setup;
-      if (!RULESETS.has(ruleset)) throw new TypeError(`newGame: unknown ruleset "${ruleset}"`);
       const name = (i) => String(names[i] ?? '').trim() || t.player(i + 1);
       wasm?.newGame(ruleset, String(breaker), Math.round(Number(raceTo)) || 1, name(0), name(1));
     }),
@@ -203,8 +358,11 @@ export async function createCue(options = {}) {
     nextRack: guard(() => wasm?.nextRack()),
     stalemate: guard(() => wasm?.stalemate()),
     spotRequest: guard(() => wasm?.spotRequest()),
-    setViewInsets: guard((top, bottom) => wasm?.setViewInsets(Number(top) || 0, Number(bottom) || 0)),
-    state: () => (wasm && !destroyed ? wasm.state() : null),
+    setViewInsets: guard((top, bottom) => {
+      insets = [Number(top) || 0, Number(bottom) || 0];
+      sendInsets();
+    }),
+    state: () => (wasm && !destroyed && !failed ? wasm.state() : null),
     enterFullscreen: () => fs.enter(),
     exitFullscreen: () => fs.exit(),
   };
@@ -237,45 +395,95 @@ export async function createCue(options = {}) {
     overlay.setState('loading');
   }
 
+  // Removes everything CUE added: shared by `destroy` and a cancelled load.
+  const release = () => {
+    ratioQuery?.removeEventListener('change', applyResolution);
+    canvas.removeEventListener('webglcontextlost', onContextLost);
+    motionQuery?.removeEventListener?.('change', applyMotion);
+    fs.exit();
+    fs.dispose();
+    overlay?.destroy();
+    root.remove();
+    if (live === owner) live = null;
+  };
+
+  // `signal`: cancelling before the engine starts leaves nothing behind and
+  // frees the page for another `createCue` at once, even within the same
+  // task (React's StrictMode remounts that way). Once the engine runs, it
+  // destroys the instance. Either way the promise rejects with `ABORTED`.
+  let rejectAbort;
+  const aborted = new Promise((_, reject) => (rejectAbort = reject));
+  aborted.catch(() => {});
+  const onAbort = () => {
+    rejectAbort(abortError(signal));
+    if (instance) instance.destroy();
+    else release();
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+  // Waits for one loading step, and stops the load if it was cancelled meanwhile.
+  const step = async (promise) => {
+    const value = await (signal ? Promise.race([promise, aborted]) : promise);
+    if (signal?.aborted) throw abortError(signal);
+    return value;
+  };
+
+  // Without the built-in controls there is nothing to explain the failure,
+  // so CUE takes its root away; with them, the root shows a message.
   const fail = (kind, error) => {
-    overlay?.showMessage(error.message === 'RELOAD_REQUIRED' ? 'reload' : kind);
-    live = null;
-    emit('error', { code: error.message });
+    signal?.removeEventListener('abort', onAbort);
+    if (overlay) overlay.showMessage(error.message === 'RELOAD_REQUIRED' ? 'reload' : kind);
+    else root.remove();
+    if (live === owner) live = null;
+    emit('error', describeError(error));
     return error;
   };
 
   if (typeof WebAssembly !== 'object' || !hasWebGL2()) {
     throw fail('unsupported', new Error('UNSUPPORTED_BROWSER'));
   }
+  if (spent) throw fail('reload', new Error('RELOAD_REQUIRED'));
 
   // Load the module, then stream the binary with honest progress.
   try {
     const base = options.assetBase ? new URL(String(options.assetBase), document.baseURI) : null;
     const wasmUrl = base ? new URL('pkg/cue_web_bg.wasm', base) : new URL('./pkg/cue_web_bg.wasm', import.meta.url);
-    const [module, manifest] = await Promise.all([
-      base ? import(/* @vite-ignore */ new URL('pkg/cue_web.js', base).href) : import('./pkg/cue_web.js'),
-      (base ? import(/* @vite-ignore */ new URL('manifest.js', base).href) : import('./manifest.js')).then(
-        (m) => m.default,
-        () => null,
-      ),
-    ]);
-    const response = await fetch(wasmUrl);
+    const [module, manifest] = await step(
+      Promise.all([
+        base ? import(/* @vite-ignore */ new URL('pkg/cue_web.js', base).href) : import('./pkg/cue_web.js'),
+        (base ? import(/* @vite-ignore */ new URL('manifest.js', base).href) : import('./manifest.js')).then(
+          (m) => m.default,
+          () => null,
+        ),
+      ]),
+    );
+    const response = await step(fetch(wasmUrl, { signal }));
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    await module.default({
-      module_or_path: withProgress(response, manifest?.wasm?.bytes, (p) => overlay?.setProgress(p)),
-    });
+    await step(
+      module.default({
+        module_or_path: withProgress(response, manifest?.wasm?.bytes, (p) => overlay?.setProgress(p)),
+      }),
+    );
     wasm = module;
   } catch (err) {
-    canvas.remove();
+    if (signal?.aborted) throw abortError(signal); // `onAbort` cleaned up
+    frame.remove();
     throw fail('error', new Error(`LOAD_FAILED: ${err?.message ?? err}`));
   }
 
   const ready = new Promise((resolve) => listeners.get('ready').add(resolve));
-  wasm.setListener((name, detail) => emit(name, detail));
+  wasm.setListener((name, detail) => {
+    if (name === 'error' && FATAL.has(detail?.code)) stop(detail.code);
+    else if (name === 'tier') {
+      tier = detail;
+      applyResolution();
+    } else emit(name, detail);
+  });
   try {
-    wasm.mount(`#${canvas.id}`);
+    // Its size now, so the first frame renders at the size the page shows.
+    wasm.mount(`#${canvas.id}`, Math.round(canvas.clientWidth), Math.round(canvas.clientHeight));
   } catch (err) {
     wasm.setListener(null);
+    frame.remove();
     throw fail('error', err);
   }
   applySettings();
@@ -299,7 +507,7 @@ export async function createCue(options = {}) {
     else throw new TypeError(`setMode: unknown mode "${mode}"`);
   });
 
-  const instance = {
+  instance = {
     /** Build version reported by the engine. */
     version: wasm.version(),
     /**
@@ -396,30 +604,42 @@ export async function createCue(options = {}) {
     destroy() {
       if (destroyed) return teardown;
       destroyed = true;
+      spent = true;
       teardown = new Promise((resolve) => {
         const finish = () => {
           clearTimeout(timer);
-          wasm.setListener(null);
-          motionQuery?.removeEventListener?.('change', applyMotion);
-          fs.exit();
-          fs.dispose();
-          overlay?.destroy();
-          root.remove();
-          live = null;
+          try {
+            wasm.setListener(null);
+          } catch {
+            // A failed engine may refuse even this; it emits nothing anyway.
+          }
+          release();
           resolve();
         };
-        // The engine applies the command on its next frame; don't wait
-        // forever if the tab is hidden and frames are suspended.
-        const timer = setTimeout(finish, 1000);
+        // The engine applies the command on its next frame. Don't wait
+        // forever if the tab is hidden and frames are suspended, nor at all
+        // for an engine that failed: report `destroyed` on its behalf.
+        const timer = setTimeout(() => emit('destroyed'), engineFailed ? 0 : 1000);
         listeners.get('destroyed').add(finish);
       });
-      wasm.destroy();
+      try {
+        wasm.destroy();
+      } catch {
+        // A failed engine cannot take the command; the timer finishes.
+      }
       return teardown;
     },
   };
 
+  owner = instance;
   live = instance;
-  await ready;
+  try {
+    await step(ready);
+  } catch (err) {
+    await instance.destroy(); // cancelled after the engine started
+    throw err;
+  }
+  signal?.removeEventListener('abort', onAbort);
   overlay?.setState('ready');
   if (options.mode === 'eight-ball-local') api.newGame(options.match ?? {});
   if (ui && !tutorialSeen(persist)) overlay.showTutorial();
@@ -488,7 +708,8 @@ function fullscreenController(root, onChange) {
         }
       }
       if (immersive) return;
-      immersive = { root: root.getAttribute('style'), body: document.body.style.overflow };
+      // CSSOM, not the style attribute: a strict `style-src` allows only the former.
+      immersive = { root: root.style.cssText, body: document.body.style.overflow };
       Object.assign(root.style, {
         position: 'fixed',
         inset: '0',
@@ -503,7 +724,7 @@ function fullscreenController(root, onChange) {
     async exit() {
       if (native()) await document.exitFullscreen().catch(() => {});
       if (immersive) {
-        root.setAttribute('style', immersive.root ?? '');
+        root.style.cssText = immersive.root;
         document.body.style.overflow = immersive.body;
         immersive = null;
       }

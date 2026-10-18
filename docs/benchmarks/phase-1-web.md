@@ -64,6 +64,11 @@ From the public URL, desktop Chromium on a fast connection: first frame
 | 1 | 4.11 MiB | baseline after trimming |
 | 2 | 4.12 MiB | pockets, Han cushions, throw, squirt, shot reports (+11 KiB) |
 | 3 | 4.14 MiB | procedural audio, command bridge (+14 KiB); the JS control layer adds ≈ 14 KiB |
+| 6 | 4.17 MiB | eight-ball, visuals, lifecycle hardening; the control layer is 32 KiB |
+
+Since `1.0.0-beta.2` the build enforces budgets: **4.6 MiB** for the engine
+and **35 KiB** for the control layer, Brotli 11 (`scripts/size-report.mjs`).
+Raising one is a decision, to be recorded here.
 
 ## Runtime
 

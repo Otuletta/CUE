@@ -261,6 +261,12 @@ impl World {
         self.time
     }
 
+    /// Strikes taken in this world: the id of the latest shot, which its
+    /// [`ShotReport`] will carry.
+    pub fn shots(&self) -> u32 {
+        self.shots
+    }
+
     /// Whether every ball has stopped.
     pub fn is_at_rest(&self) -> bool {
         self.next.is_none()

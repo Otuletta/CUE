@@ -86,6 +86,11 @@ On WebGL2, Bevy has a single shadow cascade, which by default spreads over
 | Low | off | off |
 | Auto | starts High, steps down | — |
 
+> **Amended by [ADR-0013](0013-camera-entry-persistence-languages.md)
+> (2026-10-18):** every profile renders at most `render.pixelRatioCap`
+> pixels per CSS pixel (default 2), and Low at most 1.5. Resolution is the
+> only addition; the physics is still untouched.
+
 **Auto** works locally, with no telemetry and no permissions:
 
 - It waits through a 3-second warm-up after starting and after every change,

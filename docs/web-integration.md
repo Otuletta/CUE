@@ -63,7 +63,8 @@ Production builds need nothing else. Vite copies and fingerprints the engine
 names them with static `import()` and `new URL(…, import.meta.url)`
 expressions. [`web/example-vite`](../web/example-vite) is a working example.
 CI installs the npm tarball into a fresh copy of it and builds it on every
-pull request (`scripts/consumer-test.sh`).
+pull request (`scripts/consumer-test.sh`), and runs the page lifecycle in
+Chrome against the built bundle ([`web/e2e`](../web/e2e)).
 
 ## Files elsewhere (CDN)
 
@@ -113,22 +114,25 @@ instead of destroying and re-creating it:
 
 ```js
 // cue-host.js: module scope survives route changes.
-let cue;
+let cue; // the instance, as a promise, so overlapping calls share one
 
-export async function show(container) {
-  if (cue) {
-    cue.attach(container);
-    cue.resume();
-  } else {
-    const { createCue } = await import('@tuletta/cue');
-    cue = await createCue({ container });
-  }
+export function show(container) {
+  cue ??= import('@tuletta/cue').then(({ createCue }) => createCue({ container }));
+  return cue.then((game) => {
+    game.attach(container); // nothing to do when it is already there
+    game.resume('route');
+  });
 }
 
 export function hide() {
-  cue?.pause();
+  cue?.then((game) => game.pause('route'), () => {});
 }
 ```
+
+Keeping the promise rather than the instance matters: a second `show` that
+arrives while CUE is still loading, as React's StrictMode does in
+development, reuses the first load instead of failing with
+`INSTANCE_ALREADY_MOUNTED`. The calls run in order once CUE is ready.
 
 ### React
 

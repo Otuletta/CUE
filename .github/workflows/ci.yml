@@ -53,6 +53,13 @@ jobs:
         run: node --test 'web/package/test/*.test.mjs'
       - name: Build web/dist
         run: scripts/build-web.sh
+      # The page lifecycle in Chrome against the bundle just built: mounting,
+      # pausing, cancelling, failures and destroying (spec §17.3, §18.4).
+      - name: Browser end-to-end tests
+        working-directory: web/e2e
+        run: |
+          npm ci
+          npm test
       # The npm tarball, installed into a fresh Vite app and built (spec §17.2, §26.2).
       - name: Clean consumer
         run: scripts/consumer-test.sh

@@ -1,0 +1,12 @@
+{
+  "name": "cue-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser tests of the built bundle in web/dist. Run scripts/build-web.sh first.",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 'test/*.test.mjs'"
+  },
+  "devDependencies": {
+    "playwright-core": "1.63.0"
+  }
+}

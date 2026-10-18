@@ -1,0 +1,9 @@
+html,
+body {
+  margin: 0;
+}
+
+.box {
+  width: 640px;
+  height: 360px;
+}

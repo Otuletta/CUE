@@ -48,7 +48,7 @@ async function start() {
       // An SPA would route away here. ADR-0006: pause and hide instead of
       // destroying, so coming back is instant.
       onExit: () => {
-        game.pause();
+        game.pause('exit');
         stage.dataset.state = 'exited';
         play.textContent = 'Back to the table';
         play.disabled = false;
@@ -68,9 +68,12 @@ async function start() {
   record('engine version', game.version);
   log('ready');
 
-  for (const name of ['shot-start', 'paused', 'resumed', 'undo', 'destroyed']) {
+  for (const name of ['undo', 'destroyed']) {
     game.on(name, () => log(name));
   }
+  game.on('shot-start', ({ shotId, shooter }) => log(`shot-start #${shotId}${shooter ? ` by ${shooter}` : ''}`));
+  game.on('paused', ({ reason }) => log(`paused (${reason})`));
+  game.on('resumed', ({ reason }) => log(`resumed (${reason})`));
   game.on('racked', ({ cleared }) => log(`racked${cleared ? ' (table cleared)' : ''}`));
   game.on('ball-pocketed', ({ ballId, pocketId }) =>
     log(`ball-pocketed ${ballId === 0 ? 'cue ball' : ballId} → ${pocketId}`),
@@ -93,7 +96,7 @@ async function start() {
   game.on('groups-assigned', ({ seat, group }) => log(`groups-assigned ${seat} ${group}`));
   game.on('decision-required', (d) => log(`decision-required ${d.situation}: ${d.chooser} [${d.options.join(', ')}]`));
   game.on('decided', (d) => log(`decided ${d.choice} → ${d.shooter} (${d.inHand})`));
-  game.on('rack-over', (o) => log(`rack-over ${o.winner}${o.loss ? ` (${o.loss})` : ''} ${o.score.join('–')}`));
+  game.on('game-over', (o) => log(`game-over ${o.winner}${o.loss ? ` (${o.loss})` : ''} ${o.score.join('–')}`));
   game.on('match-over', (o) => log(`match-over ${o.winner} ${o.score.join('–')}`));
   game.on('ball-spotted', ({ ballId }) => log(`ball-spotted ${ballId}`));
   game.on('shot-refused', ({ reason }) => log(`shot-refused ${reason}`));
@@ -105,7 +108,7 @@ async function start() {
 play.addEventListener('click', () => {
   if (stage.dataset.state === 'exited') {
     stage.dataset.state = 'running';
-    game.resume();
+    game.resume('play');
     stage.querySelector('canvas')?.focus();
     return;
   }
@@ -123,6 +126,6 @@ $('destroy').addEventListener('click', async () => {
 // A hidden tab should cost nothing.
 document.addEventListener('visibilitychange', () => {
   if (!game || stage.dataset.state !== 'running') return;
-  if (document.hidden) game.pause();
-  else game.resume();
+  if (document.hidden) game.pause('hidden');
+  else game.resume('visible');
 });

@@ -98,7 +98,7 @@ export function createOverlay(root, deps) {
     openSheet = null;
     background().forEach((el) => (el.inert = false));
     if (name === 'help') deps.onTutorialDone?.();
-    if (name === 'paused') api.resume();
+    if (name === 'paused') api.resume('user');
     if (!restore) return;
     // The control that opened the sheet may have gone (a panel that closed).
     const back = returnFocus?.isConnected && returnFocus.checkVisibility?.() !== false ? returnFocus : canvas();
@@ -127,7 +127,7 @@ export function createOverlay(root, deps) {
   function togglePause() {
     if (openSheet === 'paused') close();
     else if (!openSheet) {
-      api.pause();
+      api.pause('user');
       open('paused');
     }
   }
@@ -395,11 +395,17 @@ export function createOverlay(root, deps) {
       }
     },
     showMessage(kind) {
+      // A failure can arrive while a dialog is open: the message replaces it.
+      if (openSheet) {
+        $(`[data-sheet="${openSheet}"]`).hidden = true;
+        openSheet = null;
+      }
       const card = $('[data-sheet="message"] .card');
       const unsupported = kind === 'unsupported';
       const text = {
         unsupported: [t.unsupportedTitle, t.unsupportedBody],
         reload: [t.reloadTitle, t.reloadBody],
+        stopped: [t.stoppedTitle, t.stoppedBody],
       }[kind] ?? [t.errorTitle, t.errorBody];
       card.querySelector('h2').textContent = text[0];
       card.querySelector('p').textContent = text[1];
@@ -407,8 +413,11 @@ export function createOverlay(root, deps) {
       link.hidden = !fallbackUrl;
       if (fallbackUrl) link.href = fallbackUrl;
       card.querySelector('[data-action="reload"]').hidden = unsupported;
+      // Keep the keyboard with CUE if it was there, on the way out.
+      const focused = shadow.activeElement !== null || document.activeElement === canvas();
       this.setState(kind);
       $('[data-sheet="message"]').hidden = false;
+      if (focused) card.querySelector('button:not([hidden]), a:not([hidden])')?.focus({ preventScroll: true });
     },
     showTutorial() {
       open('help');

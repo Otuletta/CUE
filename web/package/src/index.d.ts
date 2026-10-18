@@ -109,6 +109,20 @@ export interface CueOptions {
   rulesUrl?: string;
   /** Where `manifest.json` and `pkg/` are served, when not next to the module. */
   assetBase?: string | URL;
+  render?: {
+    /**
+     * Pixels rendered per CSS pixel at most, on screens denser than that.
+     * Default 2; at least 0.5. The low quality tier renders at most 1.5.
+     */
+    pixelRatioCap?: number;
+  };
+  /**
+   * Cancels the load: `createCue` rejects with `ABORTED` (named
+   * `AbortError`). Before the engine starts, nothing is left behind and
+   * another `createCue` can start at once; after, it destroys the instance.
+   * No effect once `createCue` has resolved.
+   */
+  signal?: AbortSignal | null;
 }
 
 export interface Call {
@@ -223,6 +237,37 @@ export interface ShotSummary {
   objectBallsToCushion: number;
 }
 
+/** Who shot: the seat in a match, `null` in free play. */
+export interface ShotStart {
+  /** The id its `shot-end` carries too. */
+  shotId: number;
+  shooter: Seat | null;
+}
+
+/** `user` when the player used CUE's own pause control, else the reason given. */
+export interface RunChange {
+  reason: 'user' | 'host' | (string & {});
+}
+
+/** Codes in `createCue` rejections and `error` events (docs/api.md). */
+export type ErrorCode =
+  | 'INSTANCE_ALREADY_MOUNTED'
+  | 'RELOAD_REQUIRED'
+  | 'UNSUPPORTED_BROWSER'
+  | `LOAD_FAILED: ${string}`
+  /** The load was cancelled with `signal` (a rejection, never an event). */
+  | 'ABORTED'
+  /** The engine stopped after an internal error (after start). */
+  | 'ENGINE_FAILED'
+  /** The browser dropped the WebGL context (after start). */
+  | 'CONTEXT_LOST';
+
+/** An `error` event: a stable code and a description that is safe to show. */
+export interface CueError {
+  code: ErrorCode;
+  message: string;
+}
+
 export interface RackResult extends OutcomeDetail {
   /** Racks won, A then B. */
   score: [number, number];
@@ -232,25 +277,27 @@ export interface RackResult extends OutcomeDetail {
 export interface CueEvents {
   /** The build version. */
   ready: string;
-  'shot-start': undefined;
+  'shot-start': ShotStart;
   'ball-pocketed': PocketedBall;
   'shot-end': ShotSummary | { abandoned: true };
   racked: { cleared: boolean };
   undo: undefined;
-  paused: undefined;
-  resumed: undefined;
+  paused: RunChange;
+  resumed: RunChange;
   'fullscreen-change': { fullscreen: boolean };
   'settings-change': Settings;
   destroyed: undefined;
-  error: { code: string };
+  error: CueError;
   'new-game': { mode: 'free-play' | 'eight-ball' };
   ruling: RulingDetail;
   foul: { shooter: Seat; fouls: Foul[]; wrongBall: number | null };
   'groups-assigned': { seat: Seat; group: Group };
-  'turn-changed': { shooter: Seat; inHand: InHand };
+  /** `shooter` is the incoming player, `previous` the outgoing one. */
+  'turn-changed': { shooter: Seat; previous: Seat; inHand: InHand };
   'decision-required': DecisionDetail;
   decided: { choice: Choice; shooter: Seat; inHand: InHand; stage: Stage };
-  'rack-over': RackResult;
+  /** A rack is decided. */
+  'game-over': RackResult;
   'match-over': RackResult;
   'ball-spotted': { ballId: number };
   'shot-refused': { reason: Refusal };
@@ -264,9 +311,13 @@ export interface CueInstance {
   on<K extends keyof CueEvents>(name: K, handler: (detail: CueEvents[K]) => void): () => void;
   /** Resolves once the game runs; resumes a paused instance. */
   start(): Promise<void>;
-  /** Stops simulation, input, sound and rendering (0 frames). */
-  pause(): void;
-  resume(): void;
+  /**
+   * Stops simulation, input, sound and rendering (0 frames). `reason`, a
+   * short word, is reported by the `paused` event; default `host`.
+   */
+  pause(reason?: string): void;
+  /** Continues a paused instance; `reason` as for `pause`. */
+  resume(reason?: string): void;
   /** Moves the game into another container (single-page apps). */
   attach(container: HTMLElement): void;
   /** Re-measures the layout after moves or restyles. */
@@ -305,7 +356,7 @@ export interface CueInstance {
   setQuality(quality: Quality): void;
   setAudio(audio: Partial<AudioSettings>): void;
   getSettings(): Settings;
-  /** `null` once destroyed. */
+  /** `null` once destroyed, or after a failure (`ENGINE_FAILED`, `CONTEXT_LOST`). */
   getState(): CueState | null;
   enterFullscreen(): Promise<void>;
   exitFullscreen(): Promise<void>;
@@ -322,6 +373,6 @@ export interface CueInstance {
 /**
  * Mounts CUE in `options.container` and resolves once the first frame has
  * run. Rejects with `INSTANCE_ALREADY_MOUNTED`, `UNSUPPORTED_BROWSER`,
- * `LOAD_FAILED: …` or `RELOAD_REQUIRED`.
+ * `LOAD_FAILED: …`, `RELOAD_REQUIRED` or `ABORTED`.
  */
 export function createCue(options: CueOptions): Promise<CueInstance>;

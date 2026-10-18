@@ -10,6 +10,7 @@ has been tested, and how. "Untested" means only that: not that it fails.
 | Environment | Priority | Status | Evidence |
 |---|---|---|---|
 | Chromium, macOS (Apple M4 Pro) | High | **Tested** | Development and every measurement in `docs/benchmarks/`, in the Claude desktop browser pane: loading, input, pausing, eight-ball flows, a strict CSP and a Vite host. |
+| Chrome, Linux, headless with SwiftShader (no GPU) | CI | **Automated** on every pull request | [`web/e2e`](../web/e2e): mounting, a shot, pausing, moving, cancelling a load, a failed download, a lost WebGL context and destroying, under the strict CSP, with no violations or uncaught errors allowed. |
 | Chrome or Safari on a phone | High | **Smoke-tested** (Phase 1) | The maintainer played on a phone in Phase 1. Device and browser not recorded. |
 | Firefox, desktop | High | Untested | |
 | Safari, macOS | High | Untested | |
