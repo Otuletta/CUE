@@ -1,0 +1,14 @@
+html,
+body {
+  margin: 0;
+}
+
+/* Taller than the viewport: below it, the element is out of sight. */
+.spacer {
+  height: 1500px;
+}
+
+/* No size for the element itself: it must size itself (16:9). */
+cue-game {
+  width: 640px;
+}

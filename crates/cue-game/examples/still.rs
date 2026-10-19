@@ -5,8 +5,9 @@
 //! be shown (CI, a locked screen):
 //!
 //! - `CUE_STILL=<path.png>` is where the image goes (required).
-//! - `CUE_VIEW=table|rack|cue` picks the camera: the whole table, a close-up
-//!   of the rack's numbers, or the cue behind the cue ball.
+//! - `CUE_VIEW=table|rack|cue` picks the framing, always from straight above
+//!   as in the game: the whole table, a close-up of the rack's numbers, or
+//!   the cue ball and the cue.
 //! - `CUE_SIZE=<width>x<height>` sets the image size (default 1920x1080).
 //! - `CUE_THEME=classic|studio|contrast` picks the presentation.
 
@@ -14,7 +15,7 @@ use std::time::Duration;
 
 use bevy::{
     app::ScheduleRunnerPlugin,
-    camera::RenderTarget,
+    camera::{RenderTarget, ScalingMode},
     prelude::*,
     render::{
         render_resource::TextureFormat,
@@ -77,15 +78,15 @@ fn main() -> AppExit {
         .run()
 }
 
-/// Points the table camera at an image instead of a window, from the chosen
-/// viewpoint.
+/// Points the table camera at an image instead of a window, and frames the
+/// chosen view from straight above.
 fn aim_camera(
     mut commands: Commands,
     mut still: ResMut<Still>,
     mut images: ResMut<Assets<Image>>,
-    mut camera: Query<(Entity, &mut Transform), With<Camera3d>>,
+    mut camera: Query<(Entity, &mut Transform, &mut Projection), With<Camera3d>>,
 ) {
-    let Ok((entity, mut transform)) = camera.single_mut() else {
+    let Ok((entity, mut transform, mut projection)) = camera.single_mut() else {
         return;
     };
     let target = images.add(Image::new_target_texture(
@@ -98,18 +99,26 @@ fn aim_camera(
         .entity(entity)
         .insert(RenderTarget::Image(target.clone().into()));
     still.target = Some(target);
-    *transform = match still.view.as_str() {
-        // Low over the foot of the table, looking at the rack.
-        "rack" => {
-            Transform::from_xyz(0.42, 0.42, 0.34).looking_at(Vec3::new(0.7, 0.0, 0.0), Vec3::Y)
-        }
-        // Behind and above the cue ball at the break spot.
-        "cue" => {
-            Transform::from_xyz(-1.12, 0.3, 0.22).looking_at(Vec3::new(-0.72, 0.02, 0.0), Vec3::Y)
-        }
-        // The whole table, as the game frames it on a 16:9 screen.
-        _ => Transform::from_xyz(0.0, 3.05, 0.62).looking_at(Vec3::ZERO, Vec3::Y),
+    // The centre of the view and the half-extents it must show, in metres.
+    let (centre, half) = match still.view.as_str() {
+        // The rack at the foot spot.
+        "rack" => (Vec3::new(0.7, 0.0, 0.0), Vec2::new(0.18, 0.16)),
+        // The cue ball at the break spot, with the cue behind it as far as
+        // its forearm.
+        "cue" => (Vec3::new(-1.15, 0.0, 0.0), Vec2::new(0.62, 0.2)),
+        // The whole table with its frame, as the game frames it.
+        _ => (Vec3::ZERO, Vec2::new(1.57, 0.94)),
     };
+    let aspect = still.size.x as f32 / still.size.y.max(1) as f32;
+    let width = (half.x * 2.0).max(half.y * 2.0 * aspect);
+    *transform =
+        Transform::from_translation(centre + Vec3::Y * 3.0).looking_to(Vec3::NEG_Y, Vec3::NEG_Z);
+    if let Projection::Orthographic(ortho) = projection.as_mut() {
+        ortho.scaling_mode = ScalingMode::Fixed {
+            width,
+            height: width / aspect,
+        };
+    }
 }
 
 fn capture(

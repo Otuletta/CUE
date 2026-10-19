@@ -1,15 +1,27 @@
 # API reference
 
-The package is `@tuletta/cue`, a provisional name (spec §17.2). It has one
-entry point, `createCue`, and the types in
-[`index.d.ts`](../web/package/src/index.d.ts) mirror this page. For hosting,
-frameworks and the page lifecycle, see [web-integration.md](web-integration.md).
+The package is `@tuletta/cue`, a provisional name (spec §17.2). It has two
+entry points:
+
+- `createCue`, the full API; the types in
+  [`index.d.ts`](../web/package/src/index.d.ts) mirror this page;
+- the [`<cue-game>` element](#the-cue-game-element), from
+  `@tuletta/cue/element`, which wraps `createCue` in one tag and handles
+  sizing, lazy loading, pausing and route changes.
+
+For hosting, frameworks and the page lifecycle, see
+[web-integration.md](web-integration.md).
 
 ```js
 import { createCue } from '@tuletta/cue';
 
 const game = await createCue({ container: document.querySelector('#cue') });
 const off = game.on('shot-end', (shot) => console.log(shot));
+```
+
+```html
+<script type="module" src="https://cdn.jsdelivr.net/npm/@tuletta/cue/element.js"></script>
+<cue-game mode="eight-ball-local" locale="es"></cue-game>
 ```
 
 ## `createCue(options)`
@@ -36,6 +48,7 @@ first frame has run. The container must have a size; CUE fills it.
 | `rulesUrl` | `string` | | Link to the rules notes, shown in the match setup. |
 | `assetBase` | `string \| URL` | the module's folder | Where `manifest.js`, `manifest.json` and `pkg/` are served (a CDN, or a copy in a public folder). |
 | `signal` | `AbortSignal` | | Cancels the load ([below](#cancelling-a-load)). |
+| `onEvent` | `(name, detail) => void` | | Called with every [event](#events), from the start of the load, so errors raised before the instance exists arrive too. For wrappers that forward them all. |
 
 ### Rejections
 
@@ -184,6 +197,70 @@ number of `ball-pocketed` events between them. In a match, `ruling` follows
 Event names and detail shapes are part of the versioned API: within a major
 version, details only gain fields.
 
+## The `<cue-game>` element
+
+```js
+import '@tuletta/cue/element'; // or <script type="module" src="…/element.js">
+```
+
+```html
+<cue-game mode="eight-ball-local" player-a="Ana" player-b="Bo" race-to="3"></cue-game>
+```
+
+The element mounts CUE inside itself with `createCue`
+([ADR-0015](adr/0015-cue-game-element.md)):
+
+- **Size:** 16:9, or 3:4 on a phone held upright, at most the viewport's
+  height. These are defaults: any CSS the page writes for `cue-game` wins.
+- **Loading:** the engine downloads as the element comes within half a
+  screen of the viewport.
+- **Pausing:** while scrolled out of view, while the tab is hidden and while
+  the element is out of the document. It never resumes a pause it did not
+  make, such as the player's.
+- **Route changes:** when the element leaves the document its game waits,
+  paused. The next `<cue-game>` to connect adopts it, applies its own
+  attributes and resumes: no reload, no lost match.
+
+| Attribute | Values | Live | Notes |
+|---|---|---|---|
+| `mode` | `free-play`, `eight-ball-local` | yes | |
+| `ruleset`, `breaker`, `race-to`, `player-a`, `player-b` | as for `newGame` | yes | Several changed together start one match. |
+| `theme`, `assists`, `quality` | as for `createCue` | yes | |
+| `muted` | boolean | yes | |
+| `volume` | 0–1 | yes | |
+| `locale` | `en`, `es` | no | |
+| `ui` | `off` | no | No built-in controls. |
+| `persist` | `off` | no | No `localStorage`. |
+| `loading` | `lazy` (default), `eager`, `manual` | no | `manual` waits for `start()`. |
+| `autopause` | `off` | no | Keep running while out of view or in a hidden tab. |
+| `asset-base`, `fallback-url`, `rules-url` | URLs | no | As `assetBase`, `fallbackUrl`, `rulesUrl`. |
+| `pixel-ratio-cap` | number | no | As `render.pixelRatioCap`. |
+| `reduced-motion`, `high-contrast` | boolean | no | As `accessibility`. |
+
+"Live" attributes also apply while the game runs; the others are read when
+the engine starts.
+
+| Member | Does |
+|---|---|
+| `game` | The `createCue` instance while this element shows the game, else `null`. |
+| `start(): Promise<instance>` | Starts the engine now. Resolves with `game`. |
+
+**Events.** Every [event](#events) is dispatched on the element as
+`cue-<name>`, with the same detail: `cue-ready`, `cue-shot-end`,
+`cue-game-over`, `cue-error`… They bubble and cross shadow roots. An element
+out of the document cannot bubble to the page, so listen on the element
+itself for `cue-paused` with reason `detached`.
+
+```js
+const table = document.querySelector('cue-game');
+table.addEventListener('cue-ready', () => table.game.setAssists('assisted'));
+table.addEventListener('cue-game-over', ({ detail }) => console.log(detail.winner));
+```
+
+A page runs one game (ADR-0006). A second element that tries to start while
+another one shows the game dispatches `cue-error` with
+`INSTANCE_ALREADY_MOUNTED`.
+
 ## State
 
 `getState()` returns a plain object, refreshed every frame. It holds no
@@ -235,6 +312,9 @@ These names are stable codes, meant for the host to translate.
   `INSTANCE_NOT_MOUNTED`, and for invalid names `UNKNOWN_THEME`,
   `UNKNOWN_ASSISTS`, `UNKNOWN_QUALITY`, `UNKNOWN_RULESET`, `UNKNOWN_SEAT`,
   `UNKNOWN_BALL`, `UNKNOWN_POCKET`, `UNKNOWN_CHOICE`.
+- **`<cue-game>` errors,** as `cue-error`: `INVALID_ATTRIBUTE` when a live
+  attribute's value is refused (the message names the attribute), and
+  `INSTANCE_ALREADY_MOUNTED`.
 
 ## Versioning
 
@@ -242,5 +322,5 @@ The API follows SemVer (spec §26.3). A breaking change to a method, an
 option, an event, a code or the state's meaning needs a major version.
 
 A physics change that alters shot outcomes is visible behaviour even if no
-signature changes. It bumps the physics profile id (now `baseline-2`) and is
+signature changes. It bumps the physics profile id (now `baseline-3`) and is
 recorded in the [changelog](../CHANGELOG.md).

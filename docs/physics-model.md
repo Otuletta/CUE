@@ -199,20 +199,20 @@ Two facts in the report exist only for the rules:
 
 ## Parameters
 
-`PhysicsProfile::baseline()` is id **`baseline-2`**. Any change to a value
+`PhysicsProfile::baseline()` is id **`baseline-3`**. Any change to a value
 bumps the id, so a change in behaviour is always visible.
 
 | Parameter | Value | Source |
 |---|---|---|
 | Sliding friction μs | 0.2 | Alciatore, typical |
-| Rolling resistance μr | 0.01 | Alciatore, typical |
+| Rolling resistance μr | 0.018 | A medium-slow cloth, for the pace of play (see "Pace") |
 | Spinning friction μsp | 0.0117 (≈10 rad/s² spin decay) | Alciatore, typical |
 | Ball–ball restitution | 0.95 | Alciatore, typical |
 | Ball–ball friction | `0.00995 + 0.108·e^(−1.088 v)` | Alciatore, fit to measured throw |
 | Ball–cushion restitution | 0.85 | Common for the Han model |
 | Ball–cushion friction | 0.2 | Common for the Han model |
 | Cushion nose height | 63.5 % of ball diameter | WPA midpoint |
-| Max cue-ball speed | 12 m/s | A strong break (Alciatore: good amateurs ≈ 9, professionals 11–13) |
+| Max cue-ball speed | 12.5 m/s | A strong break (Alciatore: good amateurs ≈ 9, professionals 11–13) |
 | Shaft endmass | 7 g | Typical shaft |
 
 ## The break
@@ -233,6 +233,7 @@ measured on 20 racks with a full-power break struck square on the apex:
 |---|---:|---:|---:|---:|
 | `baseline-1`: 8 m/s, frozen rack | 4.0 | 6.0 | 0.00 | 20/20 (only just) |
 | `baseline-2`: 12 m/s, spaced rack | 5.7 | 8.6 | 0.87 | 20/20 |
+| `baseline-3`: 12.5 m/s, slower cloth | 5.4 | 8.7 | 0.85 | 20/20 |
 
 A wider spacing (1–2 mm) did not spread the rack further. A hit a few
 millimetres off the apex still loses part of the break, as on a real table.
@@ -243,13 +244,43 @@ slider differently on the break, a fresh rack's first strike:
 
 | | Full power | Half | Quarter | Curve |
 |---|---:|---:|---:|---|
-| The break | 12 m/s | 3.0 m/s | 0.75 m/s | `p²` |
+| The break | 12.5 m/s | 3.1 m/s | 0.78 m/s | `p²` |
 | Every other shot | 7 m/s | 2.3 m/s | 0.76 m/s | `p^1.6` |
 
 As on a real table, nothing but the break is struck that hard. A full-power
-shot at 12 m/s runs the cue ball into eight cushions, which players found
+shot at 12 m/s ran the cue ball into eight cushions, which players found
 "far too strong". At 7 m/s it is a hard power shot of about five. The
-physics profile itself is unchanged: 12 m/s stays its top speed.
+physics profile's top speed is the break's.
+
+## Pace
+
+On `baseline-2`, with the typical rolling resistance of 0.01, a shot took
+7–9 seconds to settle, most of it a long, slow roll. Asked how play should
+feel, the owner chose "calibrated realism": shots that settle in 4–6
+seconds, power that builds progressively, and a break that is strong but
+believable.
+
+`baseline-3` raises the rolling resistance to 0.018: a medium-slow cloth,
+just above the typical range, which brings the long roll to a stop
+sooner. Alone, it weakened the break, which then pocketed a ball only a
+third of the time. The break's full power rises from 12 to 12.5 m/s, a
+strong professional break, which restores it (table above). Other shots
+keep their 7 m/s top.
+
+Time until every ball is under 2 cm/s, for a lone cue ball struck from the
+head spot, centre ball:
+
+| Speed | `baseline-2` | `baseline-3` |
+|---|---:|---:|
+| 1 m/s (a touch) | 4.4–5.4 s | 2.7–4.1 s |
+| 2 m/s (a medium shot) | 6.1–7.5 s | 4.1–5.2 s |
+| 3 m/s | 5.4–8.3 s | 4.9–5.9 s |
+| 4.5 m/s (a firm shot) | 6.2–8.8 s | 4.3–6.3 s |
+| 7 m/s (full power) | 4.5–10.3 s | 5.2–7.1 s |
+| The break, median | 6.8 s | 5.2 s |
+
+Ranges span three directions (along the table, 25° and 60°). The break's
+median is over 20 racks for `baseline-2` and 40 for `baseline-3`.
 
 **Calibration status.** The profile is validated against the textbook and
 published behaviours listed above, which the test suite asserts. It has

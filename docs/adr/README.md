@@ -18,7 +18,9 @@ one.
 | [0010](0010-eight-ball-rules-and-call-shot.md) | Eight-ball rules engine, profiles and call-shot interface | accepted |
 | [0011](0011-visual-direction-and-graphics-quality.md) | Visual direction, procedural assets and graphics quality | accepted |
 | [0012](0012-distribution-and-integration.md) | Distribution, integration and releases | accepted |
-| [0013](0013-camera-entry-persistence-languages.md) | Camera, first mode, persistence, languages and resolution | accepted |
+| [0013](0013-camera-entry-persistence-languages.md) | Camera, first mode, persistence, languages and resolution | accepted; camera superseded by 0014 |
+| [0014](0014-top-down-view.md) | The table from straight above | accepted |
+| [0015](0015-cue-game-element.md) | The `<cue-game>` element | accepted |
 
 ## Open decisions in the specification
 
@@ -27,7 +29,7 @@ left open, under its own IDs. This is where each one is answered:
 
 | Spec ID | Decision | Answered in | Outcome |
 |---|---|---|---|
-| ADR-005 | Camera | [0013](0013-camera-entry-persistence-languages.md) | One camera, tilted slightly (0.2 rad) |
+| ADR-005 | Camera | [0014](0014-top-down-view.md) (was [0013](0013-camera-entry-persistence-languages.md)) | One orthographic camera, straight down |
 | ADR-006 | Table appearance | [0011](0011-visual-direction-and-graphics-quality.md) | Classic, studio (default) and contrast themes |
 | ADR-007 | Physics time step | [0005](0005-event-driven-integration.md) | No time step: event-driven, exact event times |
 | ADR-008 | Friction and spin model | [0002](0002-custom-billiards-solver.md), [0007](0007-cushion-and-pocket-model.md) | A purpose-built solver instead of Rapier |

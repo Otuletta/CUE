@@ -4,7 +4,7 @@
 //! assist level changes what the aiming guide draws; neither touches the
 //! physics (spec §7.5, §21.4).
 
-use bevy::{gizmos::config::DefaultGizmoConfigGroup, prelude::*};
+use bevy::{gizmos::config::DefaultGizmoConfigGroup, prelude::*, window::PrimaryWindow};
 use cue_core::{
     glam::DVec2,
     rules::eight_ball::{Call, Choice},
@@ -81,7 +81,7 @@ impl Theme {
                 // Walnut, under the grain texture's 62–100 % shading.
                 wood: Color::srgb(0.30, 0.17, 0.095),
                 leather: Color::srgb(0.035, 0.03, 0.03),
-                floor: Color::srgb(0.2, 0.14, 0.1),
+                floor: Color::srgb(0.075, 0.058, 0.048),
                 background: Color::srgb(0.035, 0.037, 0.045),
                 guide: Color::srgba(1.0, 1.0, 1.0, 0.55),
                 guide_accent: Color::srgba(1.0, 0.85, 0.4, 0.75),
@@ -93,7 +93,7 @@ impl Theme {
                 // Dark espresso wood.
                 wood: Color::srgb(0.22, 0.14, 0.095),
                 leather: Color::srgb(0.02, 0.02, 0.022),
-                floor: Color::srgb(0.14, 0.14, 0.15),
+                floor: Color::srgb(0.062, 0.064, 0.072),
                 background: Color::srgb(0.03, 0.032, 0.04),
                 guide: Color::srgba(1.0, 1.0, 1.0, 0.6),
                 guide_accent: Color::srgba(0.55, 0.85, 1.0, 0.8),
@@ -129,6 +129,7 @@ pub(crate) struct Palette {
     pub(crate) background: Color,
     pub(crate) guide: Color,
     pub(crate) guide_accent: Color,
+    /// The guide's line width, CSS pixels.
     pub(crate) guide_width: f32,
 }
 
@@ -204,7 +205,6 @@ pub(crate) fn apply_theme(
     handles: Option<Res<TableMaterials>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut clear: ResMut<ClearColor>,
-    mut gizmos: ResMut<GizmoConfigStore>,
 ) {
     let Some(handles) = handles else {
         return;
@@ -222,7 +222,22 @@ pub(crate) fn apply_theme(
         }
     }
     clear.0 = palette.background;
-    gizmos.config_mut::<DefaultGizmoConfigGroup>().0.line.width = palette.guide_width;
+}
+
+/// Keeps the guide's lines one width on every screen. Gizmo widths are in
+/// physical pixels, so the theme's width, in CSS pixels, scales with the
+/// window's pixel ratio: a hairline on a phone otherwise.
+pub(crate) fn fit_guide_width(
+    theme: Res<Theme>,
+    window: Query<&Window, With<PrimaryWindow>>,
+    mut gizmos: ResMut<GizmoConfigStore>,
+) {
+    let scale = window.single().map_or(1.0, Window::scale_factor);
+    let width = theme.palette().guide_width * scale;
+    // Written only on change, so the store is not marked changed each frame.
+    if (gizmos.config::<DefaultGizmoConfigGroup>().0.line.width - width).abs() > 1e-3 {
+        gizmos.config_mut::<DefaultGizmoConfigGroup>().0.line.width = width;
+    }
 }
 
 #[cfg(test)]

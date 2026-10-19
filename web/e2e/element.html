@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CUE element tests</title>
+    <link rel="stylesheet" href="element.css" />
+    <script type="module" src="element.js"></script>
+  </head>
+  <body>
+    <!-- Out of view at first: a lazy element must not load yet. -->
+    <div class="spacer" id="above"></div>
+    <cue-game id="game" ui="off" persist="off" theme="studio"></cue-game>
+    <div class="spacer"></div>
+    <div id="elsewhere"></div>
+  </body>
+</html>

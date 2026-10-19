@@ -184,7 +184,7 @@ pub(crate) fn voice(kind: &SimEventKind) -> Option<(Sound, f32, f32)> {
             scaled(normal_speed, 4.0, 0.05).map(|(g, r)| (Sound::Cushion, 0.45 * g, r))
         }
         SimEventKind::Struck { speed } => {
-            scaled(speed, 12.0, 0.0).map(|(g, r)| (Sound::CueTip, 0.15 + 0.4 * g, r))
+            scaled(speed, 12.5, 0.0).map(|(g, r)| (Sound::CueTip, 0.15 + 0.4 * g, r))
         }
         SimEventKind::Pocketed { .. } => Some((Sound::Pocket, 0.4, 1.0)),
         SimEventKind::Transition { .. } | SimEventKind::CueCrossedHeadString => None,

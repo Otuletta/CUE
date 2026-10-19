@@ -9,6 +9,8 @@
 
 use bevy::prelude::*;
 
+use crate::textures;
+
 /// Marker for the cue stick's root entity.
 #[derive(Component, Debug)]
 pub(crate) struct CueStick;
@@ -22,6 +24,8 @@ struct Section {
     colour: Color,
     roughness: f32,
     metallic: f32,
+    /// Whether the section carries the inlaid points of the forearm.
+    points: bool,
 }
 
 const fn section(
@@ -39,13 +43,19 @@ const fn section(
         colour,
         roughness,
         metallic,
+        points: false,
     }
 }
 
+/// Polished brass, as on the table's pocket lips and sight line.
+const BRASS: Color = Color::srgb(0.86, 0.68, 0.38);
+const EBONY: Color = Color::srgb(0.09, 0.06, 0.05);
+
 /// From the tip to the butt, 1.47 m in all (a standard 58-inch cue). Radii
 /// follow a real cue: a 13 mm tip, a shaft tapering to the joint, and a butt
-/// thickening to 29 mm.
-const SECTIONS: [Section; 8] = [
+/// thickening to 29 mm. Brass at the joint and in two trim rings, and maple
+/// points inlaid in the ebony forearm, as on a fine cue.
+const SECTIONS: [Section; 10] = [
     // Leather tip, blue with chalk.
     section(
         0.0,
@@ -60,55 +70,41 @@ const SECTIONS: [Section; 8] = [
         0.011,
         0.024,
         (0.0065, 0.0066),
-        Color::srgb(0.93, 0.92, 0.88),
-        0.35,
+        Color::srgb(0.95, 0.94, 0.9),
+        0.3,
         0.0,
     ),
-    // Maple shaft.
+    // Maple shaft, lacquered.
     section(
         0.035,
         0.705,
         (0.0066, 0.0103),
-        Color::srgb(0.86, 0.74, 0.55),
-        0.38,
-        0.0,
-    ),
-    // Steel joint collar.
-    section(
-        0.74,
-        0.016,
-        (0.0108, 0.0108),
-        Color::srgb(0.80, 0.81, 0.83),
-        0.25,
-        1.0,
-    ),
-    // Ebony forearm.
-    section(
-        0.756,
-        0.33,
-        (0.0108, 0.0123),
-        Color::srgb(0.09, 0.06, 0.05),
+        Color::srgb(0.9, 0.8, 0.62),
         0.3,
         0.0,
     ),
+    // Brass joint collar.
+    section(0.74, 0.016, (0.0108, 0.0108), BRASS, 0.25, 1.0),
+    // Ebony forearm with maple points.
+    Section {
+        points: true,
+        ..section(0.756, 0.326, (0.0108, 0.0123), Color::WHITE, 0.28, 0.0)
+    },
+    // Brass trim ring.
+    section(1.082, 0.004, (0.0123, 0.0123), BRASS, 0.25, 1.0),
     // Linen wrap.
     section(
         1.086,
-        0.27,
+        0.266,
         (0.0123, 0.0134),
         Color::srgb(0.035, 0.035, 0.04),
         0.85,
         0.0,
     ),
+    // Brass trim ring.
+    section(1.352, 0.004, (0.0134, 0.0134), BRASS, 0.25, 1.0),
     // Butt sleeve.
-    section(
-        1.356,
-        0.1,
-        (0.0134, 0.0144),
-        Color::srgb(0.09, 0.06, 0.05),
-        0.3,
-        0.0,
-    ),
+    section(1.356, 0.1, (0.0134, 0.0144), EBONY, 0.28, 0.0),
     // Rubber bumper.
     section(
         1.456,
@@ -123,8 +119,10 @@ const SECTIONS: [Section; 8] = [
 pub(crate) fn spawn(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let points = images.add(textures::cue_points());
     commands
         .spawn((CueStick, Transform::default(), Visibility::Hidden))
         .with_children(|stick| {
@@ -144,6 +142,7 @@ pub(crate) fn spawn(
                     ),
                     MeshMaterial3d(materials.add(StandardMaterial {
                         base_color: s.colour,
+                        base_color_texture: s.points.then(|| points.clone()),
                         perceptual_roughness: s.roughness,
                         metallic: s.metallic,
                         ..default()

@@ -1,22 +1,27 @@
-//! A single, stable camera that frames the whole table at any aspect ratio.
+//! A single, stable camera straight above the table, framing all of it at
+//! any aspect ratio (ADR-0014).
+//!
+//! The projection is orthographic: every part of the cloth is drawn at the
+//! same scale, so angles on screen are angles on the table and the table
+//! reads as a crisp, designed object. Light, shadows and gloss stay 3D.
 //!
 //! Landscape screens see the table lengthwise; portrait screens see it rotated
-//! so it still fills the view. The tilt is slight: enough to read the balls as
-//! spheres, not so much that it distorts aiming (ADR-0013).
+//! so it still fills the view.
 //!
 //! The host's controls cover bands at the top and bottom of the canvas. The
 //! camera keeps the playing surface clear of those bands, where the balls
-//! are, and lets the cushions and rails run under them. Where the bands are taller than the rails,
-//! the table shrinks and moves to the middle of the free area. It moves with
-//! an off-axis projection (a Bevy sub view), so the view direction, and with
-//! it aiming, is unchanged.
+//! are, and lets the cushions and rails run under them. Where the bands are
+//! taller than the rails, the table shrinks and moves to the middle of the
+//! free area: the camera slides along the table, which an orthographic view
+//! allows without changing anything else.
 
-use bevy::{camera::SubCameraView, prelude::*, render::view::Tonemapping, window::PrimaryWindow};
+use bevy::{camera::ScalingMode, prelude::*, render::view::Tonemapping, window::PrimaryWindow};
 
 use crate::{scene::RAIL_WIDTH, sim::Simulation};
 
-/// Tilt away from straight down, radians.
-const TILT: f32 = 0.2;
+/// Height of the camera over the cloth, metres. With an orthographic view
+/// it only has to clear the lamp's light cones and keep the floor in range.
+const HEIGHT: f32 = 3.0;
 /// Empty space around the rails, metres.
 const MARGIN: f32 = 0.06;
 /// Largest share of the canvas height an inset may take.
@@ -41,11 +46,15 @@ pub(crate) fn spawn(mut commands: Commands) {
         Camera3d::default(),
         // LUT-free operator: avoids shipping tonemapping lookup tables.
         Tonemapping::AcesFitted,
-        Projection::Perspective(PerspectiveProjection {
-            fov: std::f32::consts::FRAC_PI_4,
-            ..default()
+        Projection::Orthographic(OrthographicProjection {
+            // Replaced on the first frame by `fit_to_window`.
+            scaling_mode: ScalingMode::Fixed {
+                width: 3.0,
+                height: 1.7,
+            },
+            ..OrthographicProjection::default_3d()
         }),
-        Transform::from_xyz(0.0, 3.0, 0.6).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(0.0, HEIGHT, 0.0).looking_to(Vec3::NEG_Y, Vec3::NEG_Z),
     ));
 }
 
@@ -90,14 +99,13 @@ pub(crate) fn fit_to_window(
     sim: Res<Simulation>,
     insets: Res<ViewInsets>,
     window: Query<&Window, With<PrimaryWindow>>,
-    mut camera: Query<(&mut Transform, &mut Camera, &Projection), With<TableCamera>>,
+    mut camera: Query<(&mut Transform, &mut Projection), With<TableCamera>>,
 ) {
-    let (Ok(window), Ok((mut transform, mut camera, projection))) =
-        (window.single(), camera.single_mut())
+    let (Ok(window), Ok((mut transform, mut projection))) = (window.single(), camera.single_mut())
     else {
         return;
     };
-    let Projection::Perspective(p) = projection else {
+    let Projection::Orthographic(ortho) = projection.as_mut() else {
         return;
     };
     let (width, height) = (window.width(), window.height().max(1.0));
@@ -108,32 +116,26 @@ pub(crate) fn fit_to_window(
     let screen = |v: Vec2| if portrait { Vec2::new(v.y, v.x) } else { v };
     let f = framing(width, height, *insets, screen(cloth), screen(table));
 
-    let tan_v = (p.fov / 2.0).tan();
-    // The tilt foreshortens the near-far extent and pushes the near edge
-    // towards the camera; a small allowance keeps both rails in frame.
-    let distance = (f.full_height / 2.0) / (tan_v * f.scale) * 1.04 + 0.1;
-    let offset = Vec3::new(0.0, TILT.cos(), TILT.sin()) * distance;
-    let position = if portrait {
-        Vec3::new(-offset.z, offset.y, 0.0)
-    } else {
-        offset
-    };
-    let next = Transform::from_translation(position).looking_at(Vec3::ZERO, Vec3::Y);
+    // Where the cloth's centre goes, in pixels from the top, and how far
+    // that is below the canvas's middle, in metres on the table.
+    let centre = f.full_height / 2.0 - f.offset;
+    let shift = (centre - height / 2.0) / f.scale;
+    // Screen up is the far rail in landscape and the foot in portrait. The
+    // camera slides up the screen for the table to sit lower on it.
+    let up = if portrait { Vec3::X } else { Vec3::NEG_Z };
+    let next =
+        Transform::from_translation(Vec3::Y * HEIGHT + up * shift).looking_to(Vec3::NEG_Y, up);
     if *transform != next {
         *transform = next;
     }
-
-    // Off-axis framing, in physical pixels (only the ratios matter).
-    let sub_view = (f.full_height > height + 0.5).then(|| {
-        let px = |v: f32| (v * window.scale_factor()).round().max(1.0);
-        SubCameraView {
-            full_size: UVec2::new(px(width) as u32, px(f.full_height) as u32),
-            offset: Vec2::new(0.0, px(f.offset)),
-            size: UVec2::new(px(width) as u32, px(height) as u32),
-        }
-    });
-    if camera.sub_camera_view != sub_view {
-        camera.sub_camera_view = sub_view;
+    let (w, h) = (width / f.scale, height / f.scale);
+    // Written only on change, so the projection is not marked changed each frame.
+    let same = matches!(ortho.scaling_mode, ScalingMode::Fixed { width, height } if (width - w).abs() < 1e-6 && (height - h).abs() < 1e-6);
+    if !same {
+        ortho.scaling_mode = ScalingMode::Fixed {
+            width: w,
+            height: h,
+        };
     }
 }
 

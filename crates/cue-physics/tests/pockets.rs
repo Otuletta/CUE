@@ -215,7 +215,10 @@ fn the_head_string_sensor_reports_each_crossing_of_the_cue_ball() {
     let start = DVec2::new(table.head_string_x() + 0.1, 0.0);
     let mut w = world(&[(0, start)]);
     // 2 m/s, a fraction of the profile's full power.
-    let report = play(&mut w, Strike::centre(DVec2::NEG_X, 2.0 / 12.0));
+    let report = play(
+        &mut w,
+        Strike::centre(DVec2::NEG_X, 2.0 / PhysicsProfile::baseline().cue.max_speed),
+    );
     let end = w.state(BallId::CUE).unwrap().position.x;
     assert!(
         end > table.head_string_x(),
@@ -248,7 +251,10 @@ fn a_frozen_ball_struck_into_its_own_rail_is_reported_as_frozen() {
     let z = half().y - R - 1e-6;
     let mut w = world(&[(0, DVec2::new(0.4, z - 0.4)), (5, DVec2::new(0.4, z))]);
     // 1.2 m/s, a fraction of the profile's full power.
-    let report = play(&mut w, Strike::centre(DVec2::Y, 1.2 / 12.0));
+    let report = play(
+        &mut w,
+        Strike::centre(DVec2::Y, 1.2 / PhysicsProfile::baseline().cue.max_speed),
+    );
     let contacts = cushions(&report);
     let pinned: Vec<_> = contacts.iter().filter(|c| c.0 == 5).collect();
     assert!(!pinned.is_empty(), "{report:?}");

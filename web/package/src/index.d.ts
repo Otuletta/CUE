@@ -123,6 +123,11 @@ export interface CueOptions {
    * No effect once `createCue` has resolved.
    */
   signal?: AbortSignal | null;
+  /**
+   * Called with every event, from the start of the load: errors raised
+   * before the instance exists included. For wrappers that forward all of them.
+   */
+  onEvent?: <K extends keyof CueEvents>(name: K, detail: CueEvents[K]) => void;
 }
 
 export interface Call {

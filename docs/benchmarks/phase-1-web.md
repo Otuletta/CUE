@@ -75,6 +75,12 @@ Raising one is a decision, to be recorded here.
   scoreboard, a fine-aim strip, haptics and fine aiming with `Shift`. That
   took the layer from 32 to 35.3 KiB. It is about 0.1 % of the engine's
   download, so the features were worth more than the bytes.
+- **Control layer 40 → 45 KiB (redesign, after `1.0.0-beta.2`).** The
+  premium controls took the layer to 38.3 KiB, and the `<cue-game>` element
+  (ADR-0015) adds 3.3 KiB: 41.6 KiB in all. Hosts that call `createCue`
+  never download the element. The engine is 4.18 MiB with the top-down
+  redesign (ADR-0014): its procedural textures are generated at start, so
+  they cost no download.
 
 ## Runtime
 

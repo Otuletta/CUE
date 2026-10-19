@@ -38,14 +38,15 @@ const FULL_PULL: f64 = 0.45;
 /// Shots below this power are refused, so a stray click never fires.
 pub const MIN_SHOT_POWER: f64 = 0.03;
 /// How the power slider maps to the strike, as `(top, curve)`: full power is
-/// `top` of the profile's 12 m/s, and the slider follows `power^curve`, which
-/// gives soft shots more resolution.
+/// `top` of the profile's 12.5 m/s, and the slider follows `power^curve`,
+/// which gives soft shots more resolution.
 ///
-/// The break gets the full stroke, a strong real break at 12 m/s, so it opens
-/// the rack. Every other shot tops out at a hard 7 m/s: a real power shot,
-/// not a break by accident. Half power is then 2.3 m/s and a quarter 0.76.
+/// The break gets the full stroke, a strong real break at 12.5 m/s, so it
+/// opens the rack. Every other shot tops out at a hard 7 m/s: a real power
+/// shot, not a break by accident. Half power is then 2.3 m/s and a quarter
+/// 0.76.
 const BREAK_POWER: (f64, f64) = (1.0, 2.0);
-const SHOT_POWER: (f64, f64) = (7.0 / 12.0, 1.6);
+const SHOT_POWER: (f64, f64) = (7.0 / 12.5, 1.6);
 
 /// The strike's power, as a fraction of the profile's top speed, for a
 /// slider at `power` on the break or on any other shot.
@@ -914,7 +915,7 @@ mod tests {
     fn full_power_is_a_break_only_on_the_break() {
         let top = PhysicsProfile::baseline().cue.max_speed;
         let speed = |power, on_break| strike_power(power, on_break) * top;
-        assert!((speed(1.0, true) - 12.0).abs() < 1e-9);
+        assert!((speed(1.0, true) - 12.5).abs() < 1e-9);
         assert!((speed(1.0, false) - 7.0).abs() < 1e-9);
         // Soft and medium shots keep useful speeds.
         assert!(

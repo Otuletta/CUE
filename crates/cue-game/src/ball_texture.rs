@@ -12,6 +12,10 @@
 //! the band runs horizontally under the number, as on a real ball. Every
 //! texture carries a full mip chain filtered in linear light, so small, distant
 //! balls do not shimmer.
+//!
+//! A second, smaller map gives each ball its finish: glossy lacquer, with
+//! satin ink, so the lamp's reflections pass over the number without washing
+//! it out.
 
 use std::f32::consts::{PI, TAU};
 
@@ -21,42 +25,57 @@ use bevy::{
 };
 use cue_core::{BallGroup, BallId};
 
-use crate::textures::{to_linear, with_mips};
+use crate::textures::{to_linear, with_linear_mips, with_mips};
 
 const WIDTH: u32 = 512;
 const HEIGHT: u32 = 256;
+/// Size of the finish map, texels: the ink needs less detail there.
+const FINISH_WIDTH: u32 = 256;
+const FINISH_HEIGHT: u32 = 128;
+/// Perceptual roughness of the lacquer: glossy, with the lamp's shades
+/// mirrored in it.
+pub(crate) const LACQUER_ROUGHNESS: f32 = 0.1;
+/// Perceptual roughness of the printed numbers: satin, so a reflection
+/// crossing a digit stays faint.
+const INK_ROUGHNESS: f32 = 0.62;
 
-/// Angular radius of the white number disc, radians.
-const NUMBER_DISC: f32 = 0.36;
+/// Angular radius of the white number disc, radians: from straight above it
+/// spans 60% of the ball, so the number reads at a glance, even on a phone.
+const NUMBER_DISC: f32 = 0.6435;
 /// Half-height of a stripe band, as a latitude in radians.
 const STRIPE_HALF_HEIGHT: f32 = 0.43;
 /// Angular radius of the cue ball's marker dots, radians.
 const CUE_DOT: f32 = 0.11;
 /// Edge softness, about one texel at the equator.
 const EDGE: f32 = TAU / WIDTH as f32;
-/// Glyph units (a digit is 10 tall) to tangent-plane units on the disc.
-const GLYPH_SCALE: f32 = 0.036;
-/// Half the stroke width of the digits, in glyph units.
-const STROKE: f32 = 0.72;
-/// Space between the two digits of 10–15, in glyph units.
-const DIGIT_GAP: f32 = 1.2;
+/// Glyph units (a digit is 10 tall) to ball radii on the disc, seen face on:
+/// a digit stands about 45% of the ball's diameter.
+const GLYPH_SCALE: f32 = 0.082;
+/// Half the stroke width of the digits, in glyph units: bold, for reading
+/// at a glance.
+const STROKE: f32 = 1.0;
+/// Space between the stroke centres of the two digits of 10–15, in glyph
+/// units: twice the stroke for the ink, and a clear gap between.
+const DIGIT_GAP: f32 = 2.0 * STROKE + 1.1;
 /// Size of a two-digit number relative to a single digit.
-const TWO_DIGIT_SCALE: f32 = 0.88;
+const TWO_DIGIT_SCALE: f32 = 0.8;
 
-const IVORY: [f32; 3] = [0.97, 0.96, 0.91];
-const INK: [f32; 3] = [0.06, 0.06, 0.07];
+const IVORY: [f32; 3] = [0.98, 0.96, 0.9];
+const INK: [f32; 3] = [0.025, 0.025, 0.03];
 const DOT_RED: [f32; 3] = [0.75, 0.10, 0.12];
 const EIGHT_BLACK: [f32; 3] = [0.04, 0.04, 0.045];
 
-/// Conventional pool ball hues for 1–7 (repeated for 9–15), sRGB.
+/// Conventional pool ball hues for 1–7 (repeated for 9–15), sRGB: rich and
+/// clearly apart, so neighbours such as the red 3 and the maroon 7, or the
+/// blue 2 and the purple 4, never pass for each other on any cloth.
 const HUES: [[f32; 3]; 7] = [
-    [0.96, 0.76, 0.08], // yellow
-    [0.08, 0.24, 0.72], // blue
-    [0.80, 0.10, 0.10], // red
-    [0.36, 0.14, 0.52], // purple
-    [0.96, 0.44, 0.08], // orange
-    [0.06, 0.46, 0.24], // green
-    [0.48, 0.12, 0.08], // maroon
+    [0.99, 0.79, 0.09], // yellow
+    [0.09, 0.36, 0.92], // blue
+    [0.90, 0.12, 0.10], // red
+    [0.52, 0.2, 0.76],  // purple
+    [1.0, 0.5, 0.07],   // orange
+    [0.04, 0.6, 0.3],   // green
+    [0.5, 0.15, 0.09],  // maroon
 ];
 
 /// The base colour of a ball, for UI swatches and fallbacks.
@@ -267,6 +286,28 @@ pub(crate) fn ball_image(id: BallId) -> Image {
     with_mips(WIDTH, HEIGHT, level, false)
 }
 
+/// Builds the finish (metallic-roughness) map for a numbered ball, with its
+/// mip chain: roughness in green, no metal. The cue ball has no number and
+/// needs none.
+pub(crate) fn finish_image(id: BallId) -> Option<Image> {
+    if id.group() == BallGroup::Cue {
+        return None;
+    }
+    let mut level = Vec::with_capacity((FINISH_WIDTH * FINISH_HEIGHT) as usize);
+    for y in 0..FINISH_HEIGHT {
+        let lat = (0.5 - (y as f32 + 0.5) / FINISH_HEIGHT as f32) * PI;
+        let (sin_lat, cos_lat) = lat.sin_cos();
+        for x in 0..FINISH_WIDTH {
+            let lon = (x as f32 + 0.5) / FINISH_WIDTH as f32 * TAU;
+            let dir = Vec3::new(cos_lat * lon.cos(), cos_lat * lon.sin(), sin_lat);
+            let (disc, ink) = number_ink(dir, id.number());
+            let roughness = LACQUER_ROUGHNESS + (INK_ROUGHNESS - LACQUER_ROUGHNESS) * disc * ink;
+            level.push([0.0, roughness, 0.0]);
+        }
+    }
+    Some(with_linear_mips(FINISH_WIDTH, FINISH_HEIGHT, level))
+}
+
 fn shade(id: BallId, colour: [f32; 3], dir: Vec3, lat: f32) -> [f32; 3] {
     match id.group() {
         BallGroup::Cue => {
@@ -288,21 +329,24 @@ fn shade(id: BallId, colour: [f32; 3], dir: Vec3, lat: f32) -> [f32; 3] {
 
 /// `body` with a white disc on each side of the X axis, and the number in it.
 fn numbered(body: [f32; 3], dir: Vec3, number: u8) -> [f32; 3] {
+    let (disc, ink) = number_ink(dir, number);
+    mix(body, mix(IVORY, INK, ink), disc)
+}
+
+/// How much `dir` lies in a number disc, and how much of the disc there is
+/// covered by the number's ink, each from 0 to 1.
+fn number_ink(dir: Vec3, number: u8) -> (f32, f32) {
     let disc = coverage(number_disc_distance(dir), NUMBER_DISC);
     if disc <= 0.0 {
-        return body;
+        return (0.0, 0.0);
     }
-    // Tangent-plane coordinates on the disc, read from outside the ball with
-    // the pole axis (Z) as up: right is +Y on the +X disc, −Y on the −X disc.
-    let x = dir.x.abs().max(1e-3);
-    let q = if dir.x >= 0.0 {
-        Vec2::new(dir.y / x, dir.z / x)
-    } else {
-        Vec2::new(-dir.y / x, dir.z / x)
-    };
+    // Coordinates on the disc as seen face on, in ball radii, read from
+    // outside the ball with the pole axis (Z) as up: right is +Y on the +X
+    // disc, −Y on the −X disc. Seen face on is how the game shows a ball at
+    // rest, from straight above, so the digits are drawn undistorted there.
+    let q = Vec2::new(dir.y * dir.x.signum(), dir.z);
     let distance = number_distance(q / GLYPH_SCALE, number) * GLYPH_SCALE;
-    let ink = coverage(distance, STROKE * GLYPH_SCALE);
-    mix(body, mix(IVORY, INK, ink), disc)
+    (disc, coverage(distance, STROKE * GLYPH_SCALE))
 }
 
 /// Angle to the nearer of the two number discs on opposite sides of the
@@ -327,6 +371,8 @@ fn linear(c: [f32; 3]) -> [f32; 3] {
 
 #[cfg(test)]
 mod tests {
+    use bevy::render::render_resource::TextureFormat;
+
     use super::*;
 
     /// Ink coverage of `number` at glyph-space point `q`.
@@ -345,7 +391,7 @@ mod tests {
                     let q = Vec2::new(i as f32 * 0.1, j as f32 * 0.1);
                     if number_distance(q, d) < STROKE {
                         assert!(q.x.abs() <= width / 2.0 + STROKE + 1e-3, "{d} at {q}");
-                        assert!(q.y.abs() <= 5.0 + 1e-3, "{d} at {q}");
+                        assert!(q.y.abs() <= 5.0 + STROKE + 1e-3, "{d} at {q}");
                     }
                 }
             }
@@ -377,7 +423,7 @@ mod tests {
 
     #[test]
     fn two_digit_numbers_fit_in_the_disc() {
-        let radius = NUMBER_DISC.tan() / GLYPH_SCALE;
+        let radius = NUMBER_DISC.sin() / GLYPH_SCALE;
         for n in 10..=15 {
             for i in -80..=80 {
                 for j in -60..=60 {
@@ -394,11 +440,15 @@ mod tests {
     fn the_disc_reads_upright_from_outside() {
         // The top of the 7's bar is at +Z on both discs; its right end is +Y
         // on the +X disc and −Y on the −X disc.
-        let at = |dir: Vec3| numbered([1.0, 0.0, 0.0], dir.normalize(), 7);
-        let s = GLYPH_SCALE;
-        let top_right = |side: f32| Vec3::new(side, side * 2.3 * s, 4.3 * s);
-        let top_left = |side: f32| Vec3::new(side, -side * 2.3 * s, 4.3 * s);
-        let foot_left = |side: f32| Vec3::new(side, -side * 0.7 * s, -4.3 * s);
+        // A point on the disc on `side`, `y` right and `z` up, seen face on.
+        let on = |side: f32, y: f32, z: f32| {
+            let (y, z) = (y * GLYPH_SCALE, z * GLYPH_SCALE);
+            Vec3::new(side * (1.0 - y * y - z * z).sqrt(), side * y, z)
+        };
+        let at = |dir: Vec3| numbered([1.0, 0.0, 0.0], dir, 7);
+        let top_right = |side: f32| on(side, 2.3, 4.3);
+        let top_left = |side: f32| on(side, -2.3, 4.3);
+        let foot_left = |side: f32| on(side, -0.7, -4.3);
         for side in [1.0, -1.0] {
             assert!(
                 at(top_right(side))[1] < 0.2,
@@ -407,7 +457,7 @@ mod tests {
             assert!(at(top_left(side))[1] < 0.2, "ink at the top left ({side})");
             assert!(at(foot_left(side))[1] < 0.2, "ink at the foot ({side})");
             // The other side of the foot is paper.
-            let paper = Vec3::new(side, side * 2.0 * s, -4.0 * s);
+            let paper = on(side, 2.0, -4.0);
             assert!(at(paper)[1] > 0.8, "paper at the bottom right ({side})");
         }
     }
@@ -421,6 +471,25 @@ mod tests {
             .map(|l| ((WIDTH >> l).max(1)) * ((HEIGHT >> l).max(1)) * 4)
             .sum();
         assert_eq!(image.data.as_ref().unwrap().len() as u32, expected);
+    }
+
+    #[test]
+    fn the_ink_is_satin_and_the_lacquer_glossy() {
+        assert!(finish_image(BallId::CUE).is_none());
+        // The 1's stem at the disc's centre, and the colour beside the disc.
+        let (disc, ink) = number_ink(Vec3::new(1.0, 1.1 * GLYPH_SCALE, 0.0).normalize(), 1);
+        assert!(disc > 0.99 && ink > 0.99);
+        assert!(number_ink(Vec3::Y, 1) == (0.0, 0.0));
+        let image = finish_image(BallId::new(1).unwrap()).unwrap();
+        assert_eq!(image.texture_descriptor.format, TextureFormat::Rgba8Unorm);
+        let data = image.data.as_ref().unwrap();
+        let greens: Vec<u8> = data[..(FINISH_WIDTH * FINISH_HEIGHT * 4) as usize]
+            .chunks(4)
+            .map(|t| t[1])
+            .collect();
+        let gloss = (LACQUER_ROUGHNESS * 255.0).round() as u8;
+        assert_eq!(*greens.iter().min().unwrap(), gloss);
+        assert!(*greens.iter().max().unwrap() > 140);
     }
 
     #[test]

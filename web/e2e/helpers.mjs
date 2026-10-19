@@ -13,13 +13,16 @@ export async function harness() {
   const server = await serve();
   const browser = await launch();
 
-  /** A fresh page on the test host, in `using` (this file's browser by default). */
-  async function open({ using = browser, viewport = { width: 800, height: 900 } } = {}) {
+  /**
+   * A fresh page on a test host (`path`, `host.html` by default), in `using`
+   * (this file's browser by default).
+   */
+  async function open({ using = browser, viewport = { width: 800, height: 900 }, path = 'host.html' } = {}) {
     const context = await using.newContext({ viewport });
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', (error) => errors.push(String(error)));
-    await page.goto(`${server.origin}/e2e/host.html`);
+    await page.goto(`${server.origin}/e2e/${path}`);
     await page.waitForFunction(() => window.hostReady);
     return {
       page,

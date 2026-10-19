@@ -111,7 +111,7 @@ fn follow_carries_the_cue_ball_forward_and_draw_pulls_it_back() {
         w.strike(Strike {
             direction: DVec2::X,
             // 3.2 m/s, a fraction of the profile's full power.
-            power: 3.2 / 12.0,
+            power: 3.2 / PhysicsProfile::baseline().cue.max_speed,
             tip_offset: DVec2::new(0.0, tip),
         })
         .unwrap();

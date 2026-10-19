@@ -1,13 +1,10 @@
-// The smallest useful host: load CUE on demand, then listen to it.
-const play = document.getElementById('play');
+// The smallest useful host: one tag, then listen to it. The element module is
+// small; the engine itself downloads only as the table nears the viewport.
+import '@tuletta/cue/element';
 
-play.addEventListener('click', async () => {
-  play.disabled = true;
-  // A dynamic import keeps the engine out of the page's first download.
-  const { createCue } = await import('@tuletta/cue');
-  const game = await createCue({ container: document.getElementById('cue') });
-  play.remove();
-  game.on('shot-end', (shot) => console.info('shot', shot));
-  game.on('game-over', ({ winner, score }) => console.info(`rack to ${winner}`, score));
-  window.cue = game; // for poking around in the console
+const cue = document.querySelector('cue-game');
+cue.addEventListener('cue-ready', () => {
+  window.cue = cue.game; // for poking around in the console
 });
+cue.addEventListener('cue-shot-end', ({ detail }) => console.info('shot', detail));
+cue.addEventListener('cue-game-over', ({ detail }) => console.info(`rack to ${detail.winner}`, detail.score));
