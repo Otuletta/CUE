@@ -97,7 +97,8 @@ pub struct PhysicsProfile {
 }
 
 impl PhysicsProfile {
-    /// The reference profile.
+    /// The reference profile, on a 7-foot table: the size most eight-ball is
+    /// played on, and the one that shows the balls large enough to read.
     ///
     /// Cloth, restitution and friction values are the typical figures
     /// compiled by Dr. Dave Alciatore (Colorado State University) in *Typical
@@ -109,8 +110,8 @@ impl PhysicsProfile {
     /// the reference behaviours this profile is checked against.
     pub const fn baseline() -> Self {
         Self {
-            id: "baseline-3",
-            table: TableSpec::nine_foot(),
+            id: "baseline-4",
+            table: TableSpec::seven_foot(),
             cloth: ClothParams {
                 sliding_friction: 0.2,
                 rolling_resistance: 0.018,

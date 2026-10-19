@@ -13,7 +13,7 @@ No image, font or sound file ships with CUE.*
 CUE has two parts that ship together:
 
 - **A pool game** that runs inside a web page. There is no sign-up and no
-  backend. It shows a lit 3D table from straight above, with purpose-built
+  backend. It shows a lit 7-foot table from straight above, with purpose-built
   physics, a free-play mode and local two-player eight-ball.
 - **A library** that other sites can embed with one tag, `<cue-game>`, or
   one call. Embedding it does not require knowing Rust or Bevy.

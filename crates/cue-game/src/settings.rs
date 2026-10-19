@@ -91,7 +91,7 @@ impl Theme {
                 cloth: Color::srgb(0.05, 0.20, 0.36),
                 cushion: Color::srgb(0.04, 0.16, 0.30),
                 // Dark espresso wood.
-                wood: Color::srgb(0.22, 0.14, 0.095),
+                wood: Color::srgb(0.30, 0.16, 0.085),
                 leather: Color::srgb(0.02, 0.02, 0.022),
                 floor: Color::srgb(0.062, 0.064, 0.072),
                 background: Color::srgb(0.03, 0.032, 0.04),
