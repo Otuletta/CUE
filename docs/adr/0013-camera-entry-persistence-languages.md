@@ -1,6 +1,7 @@
 # ADR-0013 — Camera, first mode, persistence, languages and resolution
 
-- **Status:** accepted
+- **Status:** accepted; the camera decision is superseded by
+  [ADR-0014](0014-top-down-view.md) (2026-10-19)
 - **Date:** 2026-10-18
 
 Records four decisions that spec §31 left open and that the code settled
@@ -25,6 +26,9 @@ argue against.
 ## Decision
 
 ### Camera: one fixed camera with a slight tilt (ADR-005)
+
+> **Superseded by [ADR-0014](0014-top-down-view.md) (2026-10-19):** the
+> camera now looks straight down, with an orthographic projection.
 
 The alternatives were straight overhead and a slight oblique view. The
 camera is **slightly oblique**: tilted 0.2 rad (about 11°) from straight

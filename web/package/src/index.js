@@ -134,6 +134,8 @@ let spent = false;
  * @param {AbortSignal} [options.signal]  Cancels the load: rejects with `ABORTED`.
  * @param {{pixelRatioCap?: number}} [options.render]  `pixelRatioCap`: pixels rendered per
  *   CSS pixel at most (default 2), on screens denser than that.
+ * @param {(name: string, detail: unknown) => void} [options.onEvent]  Called with every event,
+ *   from the start of the load: errors before the instance exists included.
  * @returns {Promise<object>} Resolves once the first frame has run.
  */
 export async function createCue(options = {}) {
@@ -149,6 +151,9 @@ export async function createCue(options = {}) {
     throw new TypeError(`createCue: unknown mode "${options.mode}"`);
   }
   if (options.mode === 'eight-ball-local') checkMatch(options.match);
+  if (options.onEvent != null && typeof options.onEvent !== 'function') {
+    throw new TypeError('createCue: `onEvent` must be a function');
+  }
   const cap = options.render?.pixelRatioCap ?? PIXEL_RATIO_CAP;
   if (!(typeof cap === 'number' && cap >= 0.5)) {
     throw new TypeError('createCue: `render.pixelRatioCap` must be a number of at least 0.5');
@@ -188,6 +193,9 @@ async function mount(options, claim) {
   }
 
   const listeners = new Map([...EVENTS].map((name) => [name, new Set()]));
+  if (options.onEvent) {
+    for (const [name, set] of listeners) set.add((detail) => options.onEvent(name, detail));
+  }
   let overlay = null;
   const emit = (name, detail) => {
     overlay?.onEvent(name, detail);

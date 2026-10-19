@@ -22,6 +22,47 @@ CUE also guarantees the following:
   `RELOAD_REQUIRED`. Single-page apps should pause and move the instance
   instead (see [below](#single-page-apps)).
 
+## One tag: `<cue-game>`
+
+The shortest integration, for any page or framework
+([api.md](api.md#the-cue-game-element), ADR-0015):
+
+```html
+<script type="module" src="https://cdn.jsdelivr.net/npm/@tuletta/cue/element.js"></script>
+<cue-game locale="es"></cue-game>
+```
+
+With a bundler, `import '@tuletta/cue/element';` once, anywhere. The element:
+
+- sizes itself (16:9, 3:4 on a phone held upright), and your CSS for
+  `cue-game` overrides that;
+- downloads the engine only as it nears the viewport;
+- pauses while out of view, in a hidden tab, or removed from the page;
+- survives route changes: a `<cue-game>` rendered on the next page adopts
+  the running game, so single-page apps need no host module;
+- dispatches every event as `cue-<name>` (`cue-shot-end`, `cue-error`…) and
+  exposes the full API as `.game`.
+
+It needs nothing from the Content Security Policy beyond what `createCue`
+needs: its styles are a constructed stylesheet, not inline.
+
+In frameworks, render it like any element. React 19 and Vue pass attributes
+and listen to custom events directly:
+
+```jsx
+<cue-game mode="eight-ball-local" player-a={a} player-b={b} oncue-game-over={onOver} />
+```
+
+```vue
+<cue-game mode="free-play" @cue-shot-end="onShot" />
+```
+
+(Vue: tell the compiler it is a custom element, with
+`compilerOptions.isCustomElement: (tag) => tag === 'cue-game'`.)
+
+The rest of this page is for `createCue`, when you need more control than
+attributes give.
+
 ## Plain HTML (no bundler)
 
 Serve the package folder (`node_modules/@tuletta/cue`, or `web/dist/package`

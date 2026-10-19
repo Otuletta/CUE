@@ -1,12 +1,27 @@
 # @tuletta/cue
 
-**A billiards engine in Rust and WebAssembly that you embed with one call.**
+**A billiards engine in Rust and WebAssembly that you embed with one tag.**
 It provides free play and two-player eight-ball, with WPA or casual rules,
 purpose-built physics and accessible controls in English and Spanish.
 
 - [Live demo](https://otuletta.github.io/CUE/)
 - [Source and documentation](https://github.com/Otuletta/CUE)
 - [API reference](https://github.com/Otuletta/CUE/blob/main/docs/api.md)
+
+```html
+<script type="module" src="https://cdn.jsdelivr.net/npm/@tuletta/cue/element.js"></script>
+<cue-game mode="eight-ball-local" locale="es"></cue-game>
+```
+
+`<cue-game>` sizes itself, downloads the engine only as it nears the
+viewport, pauses while out of sight and survives a single-page app's route
+changes. Every event arrives as a `cue-<name>` DOM event, and `.game` is the
+full API. Attributes: `mode`, `ruleset`, `breaker`, `race-to`, `player-a`,
+`player-b`, `theme`, `assists`, `quality`, `muted`, `volume`, `locale`,
+`ui="off"`, `persist="off"`, `loading`, `autopause` and more
+([reference](https://github.com/Otuletta/CUE/blob/main/docs/api.md#the-cue-game-element)).
+
+For full control, mount it yourself:
 
 ```js
 import { createCue } from '@tuletta/cue';
@@ -24,9 +39,14 @@ controls, and touches nothing else on the page.
 npm install @tuletta/cue
 ```
 
-The package is an ES module. It ships the wrapper, the engine
-(`pkg/cue_web_bg.wasm`, about 4.2 MiB with Brotli) and a manifest, and
-nothing loads until you call `createCue`.
+The package is an ES module. It ships the wrapper, the element, the engine
+(`pkg/cue_web_bg.wasm`, about 4.2 MiB with Brotli) and a manifest. The
+engine loads only when you call `createCue`, or when a `<cue-game>` nears
+the viewport.
+
+```js
+import '@tuletta/cue/element'; // defines <cue-game>
+```
 
 ### Vite
 
@@ -61,6 +81,9 @@ createCue({ container, assetBase: 'https://cdn.example.com/cue/1.0.0/' });
 ```
 
 ## Single-page apps
+
+`<cue-game>` handles route changes itself: a new element adopts the running
+game. With `createCue`:
 
 **There is one instance per page,** and `destroy()` is final: winit, the
 windowing layer, allows one event loop per page. Keep the instance and move

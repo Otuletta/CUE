@@ -16,7 +16,7 @@ build, and every check CI runs. Run them before opening a pull request.
 - **Tests.** The project is test-first where it can be:
   - **Physics:** a scenario in `crates/cue-physics/tests` that states the
     behaviour in words a player would recognise. If a change alters shot
-    outcomes, bump the physics profile id (`baseline-1`), explain the change
+    outcomes, bump the physics profile id (`baseline-N`), explain the change
     in the pull request and add a changelog line.
   - **Rules:** a case in `crates/cue-core/tests/eight_ball.rs`, named after
     the WPA rule (`rule_4_3_d_…`), and an update to

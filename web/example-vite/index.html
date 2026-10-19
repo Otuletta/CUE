@@ -5,18 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>CUE — Vite host</title>
     <style>
-      html, body { margin: 0; height: 100%; background: #0b0c10; color: #f3f1ec; font: 15px/1.5 system-ui, sans-serif; }
-      main { display: grid; gap: 12px; padding: 16px; }
-      #cue { width: 100%; aspect-ratio: 16 / 9; max-height: 80vh; border-radius: 12px; overflow: hidden; background: #000; }
-      button { justify-self: start; font: inherit; padding: 8px 16px; border-radius: 8px; border: 0; background: #e2bb74; color: #17140f; }
+      html, body { margin: 0; background: #0b0c10; color: #f3f1ec; font: 15px/1.5 system-ui, sans-serif; }
+      main { display: grid; gap: 12px; padding: 16px; max-width: 1200px; margin: 0 auto; }
+      cue-game { border-radius: 12px; }
     </style>
   </head>
   <body>
     <main>
       <h1>CUE in a Vite app</h1>
-      <p>The engine loads only when you press Play.</p>
-      <button id="play" type="button">Play</button>
-      <div id="cue"></div>
+      <p>One tag. The engine downloads as the table comes into view, and pauses while it is out of sight.</p>
+      <cue-game mode="free-play"></cue-game>
     </main>
     <script type="module" src="./main.js"></script>
   </body>

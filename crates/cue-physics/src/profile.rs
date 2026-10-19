@@ -65,8 +65,8 @@ pub struct CushionParams {
 pub struct CueParams {
     /// Cue-ball speed at full power, m/s. A good amateur break is around
     /// 9 m/s and a professional one 11–13 m/s (Alciatore); full power is a
-    /// strong break, so that breaks open the rack as they do on a real
-    /// table.
+    /// strong professional break, so that breaks open the rack as they do on
+    /// a real table.
     pub max_speed: f64,
     /// Effective mass of the shaft's tip end, kg. It sets **squirt**: the
     /// lighter it is, the less a side-spin shot pushes the cue ball off the
@@ -103,15 +103,17 @@ impl PhysicsProfile {
     /// compiled by Dr. Dave Alciatore (Colorado State University) in *Typical
     /// Physical Properties of Pool Equipment*. The ball–ball friction curve is
     /// his fit to measured throw. Cushion values follow common practice for
-    /// the Han (2005) contact model. `docs/physics-model.md` lists the
-    /// reference behaviours this profile is checked against.
+    /// the Han (2005) contact model. Rolling resistance sits just above the
+    /// typical range, a medium-slow cloth, so a shot settles in 4–6 s as on a
+    /// club table rather than gliding for nine. `docs/physics-model.md` lists
+    /// the reference behaviours this profile is checked against.
     pub const fn baseline() -> Self {
         Self {
-            id: "baseline-2",
+            id: "baseline-3",
             table: TableSpec::nine_foot(),
             cloth: ClothParams {
                 sliding_friction: 0.2,
-                rolling_resistance: 0.01,
+                rolling_resistance: 0.018,
                 // ≈10 rad/s² spin deceleration, mid-range of the 5–15 reported.
                 spinning_friction: 0.0117,
             },
@@ -128,7 +130,7 @@ impl PhysicsProfile {
                 friction: 0.2,
             },
             cue: CueParams {
-                max_speed: 12.0,
+                max_speed: 12.5,
                 shaft_endmass: 0.007,
             },
             gravity: 9.80665,

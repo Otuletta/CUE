@@ -7,10 +7,14 @@ the code's licence (MIT or Apache-2.0).
 
 | Asset | What it is | Made by | Where |
 |---|---|---|---|
-| Ball textures | Colours, stripes, number discs and numbers for balls 1–15, and the cue ball's dots; 512 × 256 with mip chains | Generated: a stroke font designed for CUE (lines and arcs as distance fields) | `crates/cue-game/src/ball_texture.rs` |
+| Ball textures | Colours, stripes, number discs and numbers for balls 1–15, and the cue ball's dots; 512 × 256 with mip chains | Generated: a stroke font designed for CUE (lines and arcs as distance fields), drawn undistorted as seen from above | `crates/cue-game/src/ball_texture.rs` |
+| Ball finish maps | Roughness for balls 1–15: glossy lacquer, satin numbers; 256 × 128, linear, with mip chains | Generated from the same number shapes | `crates/cue-game/src/ball_texture.rs` |
 | Cloth grain | A faint, tileable fibre and mottle pattern; 256 × 256 with mip chains | Generated: periodic value noise | `crates/cue-game/src/textures.rs` |
-| Table meshes | Cloth, cushions, rails, pocket surrounds, drop holes, diamond sights, foot spot | Generated from the physics geometry and WPA dimensions | `crates/cue-game/src/scene.rs` |
-| Cue | Eight tapered sections, from the tip to the bumper | Generated from real cue dimensions | `crates/cue-game/src/cue_stick.rs` |
+| Wood grain | Tileable growth rings and streaks for the frame; 512 × 128 with mip chains | Generated: warped value noise | `crates/cue-game/src/textures.rs` |
+| Pocket depth | The inside of a pocket from above: black, lifting to dark brown at the rim | Generated: a radial ramp | `crates/cue-game/src/textures.rs` |
+| Cue forearm | Four maple points inlaid in ebony, edged with brass veneer; 256 × 512 with mip chains | Generated: distance to the points' edges | `crates/cue-game/src/textures.rs` |
+| Table meshes | Cloth, cushions, chamfered rails, pocket surrounds cut round each hole, the frame's outer bevel, drop holes, brass lips and inlays, diamond sights, foot spot | Generated from the physics geometry and WPA dimensions | `crates/cue-game/src/scene.rs` |
+| Cue | Ten tapered sections, from the tip to the bumper, with a brass joint and trim rings | Generated from real cue dimensions | `crates/cue-game/src/cue_stick.rs` |
 | Ball mesh | UV sphere | Bevy primitive | `crates/cue-game/src/scene.rs` |
 | Impact sounds | Ball click, cushion thump, pocket drop, cue tip | Generated: modal synthesis | `crates/cue-audio/src/lib.rs` |
 | Game cues | Foul and win cues (a turn cue exists but is not played) | Generated: modal synthesis | `crates/cue-audio/src/lib.rs` |

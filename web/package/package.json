@@ -11,6 +11,10 @@
       "types": "./index.d.ts",
       "default": "./index.js"
     },
+    "./element": {
+      "types": "./element.d.ts",
+      "default": "./element.js"
+    },
     "./manifest.json": "./manifest.json",
     "./pkg/*": "./pkg/*"
   },
@@ -23,7 +27,9 @@
     "LICENSE-MIT",
     "LICENSE-APACHE"
   ],
-  "sideEffects": false,
+  "sideEffects": [
+    "./element.js"
+  ],
   "license": "MIT OR Apache-2.0",
   "author": "Oscar Tuletta",
   "homepage": "https://otuletta.github.io/CUE/",

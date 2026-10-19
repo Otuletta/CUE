@@ -26,4 +26,6 @@ npx vite build --logLevel warn
 wasm=$(ls dist/assets/*.wasm)
 test "$(wc -c <"$wasm")" -gt 10000000 || { echo "WASM asset too small: $wasm" >&2; exit 1; }
 grep -lq 'createCue' dist/assets/*.js || { echo "wrapper missing from the build" >&2; exit 1; }
+# The element module registers itself: a bundler must not drop it as unused.
+grep -lq 'cue-game' dist/assets/*.js || { echo "<cue-game> element missing from the build" >&2; exit 1; }
 echo "consumer test: $(basename "$tarball") builds with Vite $vite ($(du -h "$wasm" | cut -f1) WASM asset)"

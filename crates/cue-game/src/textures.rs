@@ -12,7 +12,23 @@ use bevy::{
 /// Each level averages 2×2 texels of the one above, in linear light, so
 /// minified textures keep their brightness and do not shimmer.
 pub(crate) fn with_mips(width: u32, height: u32, base: Vec<[f32; 3]>, repeat: bool) -> Image {
+    build(width, height, base, repeat, true)
+}
+
+/// Builds a linear (data, not colour) image with a full mip chain, for maps
+/// such as roughness that the shader reads as numbers.
+pub(crate) fn with_linear_mips(width: u32, height: u32, base: Vec<[f32; 3]>) -> Image {
+    build(width, height, base, false, false)
+}
+
+fn build(width: u32, height: u32, base: Vec<[f32; 3]>, repeat: bool, srgb: bool) -> Image {
     debug_assert_eq!(base.len(), (width * height) as usize);
+    let encode = |level: &[[f32; 3]], out: &mut Vec<u8>| {
+        for c in level {
+            out.extend(c.map(if srgb { to_srgb8 } else { to_unorm8 }));
+            out.push(255);
+        }
+    };
     let mut data = Vec::with_capacity((width * height * 4 * 4 / 3) as usize + 4);
     let (mut w, mut h) = (width, height);
     let mut level = base;
@@ -43,7 +59,11 @@ pub(crate) fn with_mips(width: u32, height: u32, base: Vec<[f32; 3]>, repeat: bo
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        TextureFormat::Rgba8UnormSrgb,
+        if srgb {
+            TextureFormat::Rgba8UnormSrgb
+        } else {
+            TextureFormat::Rgba8Unorm
+        },
         RenderAssetUsages::RENDER_WORLD,
     );
     image.texture_descriptor.mip_level_count = levels;
@@ -79,11 +99,9 @@ fn to_srgb8(c: f32) -> u8 {
     (s * 255.0).round() as u8
 }
 
-fn encode(level: &[[f32; 3]], out: &mut Vec<u8>) {
-    for c in level {
-        out.extend(c.map(to_srgb8));
-        out.push(255);
-    }
+/// A value in 0–1 to an 8-bit component, as is.
+fn to_unorm8(c: f32) -> u8 {
+    (c.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 /// Side of the cloth grain tile, texels.
@@ -187,6 +205,62 @@ fn hash(x: u32, y: u32, salt: u32) -> f32 {
     h = h.wrapping_mul(0x5bd1_e995);
     h ^= h >> 15;
     (h & 0x00ff_ffff) as f32 / 16_777_216.0
+}
+
+/// Size of the cue's forearm texture, texels: round the cue, then along it.
+const POINTS_SIZE: (u32, u32) = (256, 512);
+/// Circumference and length of the forearm, metres, so the inlay's lines
+/// keep one width whichever way they run.
+const FOREARM: (f32, f32) = (0.072, 0.326);
+
+/// The forearm of the cue: four maple points inlaid in ebony, each edged
+/// with a thin brass-coloured veneer, rising from the wrap towards the joint.
+/// The texture wraps round the frustum (`u`) and runs from the joint (`v` = 0)
+/// to the wrap (`v` = 1).
+pub(crate) fn cue_points() -> Image {
+    const EBONY: [f32; 3] = [0.09, 0.06, 0.05];
+    const MAPLE: [f32; 3] = [0.88, 0.76, 0.56];
+    const VENEER: [f32; 3] = [0.86, 0.68, 0.38];
+    // Where the points' tips are along the forearm, and their half-width at
+    // the wrap as a fraction of the circumference.
+    const APEX: f32 = 0.22;
+    const BASE: f32 = 0.085;
+    // The veneer's width, metres.
+    const LINE: f32 = 0.0012;
+    let (w, h) = POINTS_SIZE;
+    let texel = FOREARM.1 / h as f32;
+    let mut base = Vec::with_capacity((w * h) as usize);
+    for y in 0..h {
+        let v = (y as f32 + 0.5) / h as f32;
+        for x in 0..w {
+            let u = (x as f32 + 0.5) / w as f32;
+            // Across from the nearest point's centre line, metres.
+            let across = ((u * 4.0 + 0.5).fract() - 0.5).abs() / 4.0 * FOREARM.0;
+            // The point's edge: a straight taper from the tip to the wrap.
+            let half = (v - APEX).max(0.0) / (1.0 - APEX) * BASE * FOREARM.0;
+            // Signed distance to the edge, roughly: negative inside.
+            let slope = BASE * FOREARM.0 / ((1.0 - APEX) * FOREARM.1);
+            let edge = if v < APEX {
+                ((v - APEX) * FOREARM.1).hypot(across)
+            } else {
+                (across - half) / slope.hypot(1.0)
+            };
+            let inside = smooth(-edge / texel);
+            let veneer = smooth((LINE - edge.abs()) / texel);
+            base.push(mix3(mix3(EBONY, MAPLE, inside), VENEER, veneer).map(to_linear));
+        }
+    }
+    with_mips(w, h, base, false)
+}
+
+/// 0 below −½, 1 above ½, smooth between: a one-texel edge.
+fn smooth(t: f32) -> f32 {
+    let t = (t + 0.5).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn mix3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    [0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * t)
 }
 
 #[cfg(test)]

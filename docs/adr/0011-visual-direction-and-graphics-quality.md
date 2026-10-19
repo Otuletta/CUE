@@ -71,6 +71,13 @@ to the middle of the free band. The move uses an **off-axis projection**
 (Bevy's sub camera view), so the viewing direction, and with it aiming, is
 unchanged. Pointer rays use the same matrix.
 
+> **Amended by [ADR-0014](0014-top-down-view.md) (2026-10-19):** the camera
+> is now orthographic and straight down, so it slides along the table
+> instead of using an off-axis projection. The effect is the same, and the
+> view direction still cannot change. A low room light, without shadows,
+> adds a highlight to every ball, and the balls' ink is satin under glossy
+> lacquer.
+
 > **Amended (2026-10-18), lighting and materials:** the table is now lit
 > by a pool-table lamp. Three shades hang over the playing surface as spot
 > lights without shadows, which would cost a shadow map each on WebGL2.

@@ -90,6 +90,7 @@ impl Plugin for CuePlugin {
                 PostUpdate,
                 (
                     settings::apply_theme.run_if(resource_changed::<Theme>),
+                    settings::fit_guide_width,
                     quality::apply.run_if(resource_changed::<Graphics>),
                 ),
             )

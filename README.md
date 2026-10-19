@@ -13,10 +13,10 @@ No image, font or sound file ships with CUE.*
 CUE has two parts that ship together:
 
 - **A pool game** that runs inside a web page. There is no sign-up and no
-  backend. It has a 3D table, purpose-built physics, a free-play mode and
-  local two-player eight-ball.
-- **A library** that other sites can embed with one call and a container
-  element. Embedding it does not require knowing Rust or Bevy.
+  backend. It shows a lit 3D table from straight above, with purpose-built
+  physics, a free-play mode and local two-player eight-ball.
+- **A library** that other sites can embed with one tag, `<cue-game>`, or
+  one call. Embedding it does not require knowing Rust or Bevy.
 
 > **Status: `1.0.0-beta.2`, feature-complete and in testing.** Free play,
 > local eight-ball with WPA or casual rules, numbered balls and a modelled
@@ -30,6 +30,14 @@ CUE has two parts that ship together:
 ```sh
 npm install @tuletta/cue   # provisional name; see docs/releasing.md
 ```
+
+```html
+<script type="module" src="https://cdn.jsdelivr.net/npm/@tuletta/cue/element.js"></script>
+<cue-game mode="eight-ball-local" locale="es"></cue-game>
+```
+
+The element sizes itself, downloads the engine only as it nears the
+viewport, pauses out of sight and survives route changes. For full control:
 
 ```js
 const { createCue } = await import('@tuletta/cue');
@@ -93,18 +101,22 @@ game.on('game-over', ({ winner }) => console.log(`rack to ${winner}`));
   cues for a turn, a foul and a won rack. No audio files ship. See
   [ADR-0009](docs/adr/0009-procedural-audio.md).
 - **Visual direction with no asset files:**
-  - **Balls:** numbers from a stroke font drawn for CUE, in mip-mapped
-    textures. A fresh rack shows the numbers facing up.
-  - **Cue:** eight sections, from the chalked tip to the bumper. It swings
-    in before the strike lands, or not at all with reduced motion.
-  - **Table:** diamond sights, a marked foot spot, a faint cloth grain, and
-    contact shadows fitted to the table.
+  - **Balls:** bold numbers from a stroke font drawn for CUE, on large
+    discs, under glossy lacquer with satin ink, so they read at a glance
+    from above. A fresh rack shows the numbers facing up.
+  - **Cue:** a maple shaft, a brass joint and trim rings, and an ebony
+    forearm with inlaid points. It swings in before the strike lands, or
+    not at all with reduced motion.
+  - **Table:** one continuous wood frame with chamfered rails and brass
+    pocket lips, diamond sights, a marked foot spot, a faint cloth grain,
+    and contact shadows fitted to the table.
 
   Everything is listed in [docs/assets.md](docs/assets.md); see
   [ADR-0011](docs/adr/0011-visual-direction-and-graphics-quality.md).
-- **A camera that respects the controls:** the playing surface stays clear
-  of the top bar and the dock. The camera moves off-axis, so aiming is
-  unaffected.
+- **A camera straight above the table:** orthographic, so angles on screen
+  are angles on the cloth ([ADR-0014](docs/adr/0014-top-down-view.md)). The
+  playing surface stays clear of the top bar and the dock: the camera
+  slides, so aiming is unaffected.
 - **Graphics quality:** Auto, High, Medium and Low change only
   anti-aliasing, shadows and, at Low, the resolution. Auto steps down by
   itself if the frame rate stays low. Dense screens render at most two
@@ -112,6 +124,10 @@ game.on('game-over', ({ winner }) => console.log(`rack to ${winner}`));
 - **Themes and preferences:** classic, studio and high-contrast themes, plus
   three aiming-guide levels. Settings are validated and kept in `localStorage`
   under `cue:v1:*`.
+- **One-tag embedding:** `<cue-game>`, with attributes for the mode, the
+  match and the preferences, `cue-*` DOM events, lazy loading, automatic
+  pausing and adoption across route changes
+  ([ADR-0015](docs/adr/0015-cue-game-element.md)).
 - **Embedding API:** `createCue({ container })` returns an instance with:
   - lifecycle: `start`, `pause`, `resume`, `attach` (move to another
     container, for single-page apps), `resize`, `destroy`;

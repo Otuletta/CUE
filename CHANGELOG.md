@@ -9,6 +9,45 @@ the physics profile id, even when no signature changes.
 
 ## [Unreleased]
 
+### Changed: the table from straight above
+
+- **The camera looks straight down,** with an orthographic projection:
+  every part of the cloth at one scale, and angles on screen are angles on
+  the table (ADR-0014, superseding ADR-0013's slight tilt).
+- **Balls read at a glance:** larger number discs (60 % of the ball), bold
+  digits drawn undistorted from above, and clear spacing in 10–15. The
+  lacquer is glossy and the ink satin, so reflections never wash a number
+  out, and a low room light gives every ball a highlight on its shoulder.
+- **One wood frame:** chamfered rails, pocket surrounds cut round each
+  hole and a bevel round the outer edge, so the frame reads as one piece
+  from above. The floor round the table is a plain dark backdrop.
+- **A finer cue:** a brass joint and trim rings, and an ebony forearm with
+  four inlaid maple points edged in brass.
+- **The guide keeps its width on every screen:** line widths are CSS
+  pixels, scaled by the pixel ratio, instead of device pixels.
+
+### Changed: shot outcomes (physics profile `baseline-3`)
+
+- **Shots settle in 4–6 seconds** instead of 7–9: the cloth's rolling
+  resistance is 0.018 (was 0.01), a medium-slow cloth, so the long, slow
+  roll at the end of a shot is shorter (`docs/physics-model.md`, "Pace").
+- **The break is 12.5 m/s** (was 12), which keeps it as strong on the
+  slower cloth: about 5.4 balls to a rail and a ball pocketed most of the
+  time. Other shots still top out at 7 m/s.
+
+### Added: the `<cue-game>` element
+
+- **`@tuletta/cue/element` defines `<cue-game>`,** CUE as one tag
+  (ADR-0015). It sizes itself, downloads the engine only as it nears the
+  viewport, pauses while out of view, in a hidden tab or removed from the
+  page, and hands its game to the next `<cue-game>` across route changes.
+  Attributes set the mode, the match and the preferences, several of them
+  live; every event is dispatched as `cue-<name>`, and `.game` is the full
+  API. It works from a CDN with one `<script type="module">`.
+- **`createCue({ onEvent })`:** one callback for every event, from the
+  start of the load.
+- The Vite example and the consumer test now use the element.
+
 ### Changed: the look, the sound and the cue
 
 - **A premium control layer,** in the style of a dark club room:
@@ -23,7 +62,7 @@ the physics profile id, even when no signature changes.
 
   On narrow stages, choices stay on one row.
 - **A finer table:** a brass line inlaid along the rails, brass pocket lips,
-  and lacquered balls with a clear coat that carries sharp reflections.
+  and lacquered balls.
 - **A calmer sound mix:**
   - ordinary contacts sit well below a hard break;
   - a burst of contacts in one frame blends instead of piling up;
@@ -94,8 +133,9 @@ the physics profile id, even when no signature changes.
 
 ### Changed
 
-- The control layer's download budget is 40 KiB (was 35) for the features
-  above (`docs/benchmarks/phase-1-web.md`).
+- The control layer's download budget is 45 KiB (was 35): 40 for the
+  features above, then 45 for the `<cue-game>` element, which only hosts
+  that use it download (`docs/benchmarks/phase-1-web.md`).
 
 ### Fixed
 
