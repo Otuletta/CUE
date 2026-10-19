@@ -794,7 +794,7 @@ mod tests {
         lay_out(
             &mut sim,
             &[
-                (0, DVec2::new(head - 0.5, 0.3)),
+                (0, DVec2::new(head - 0.4, 0.3)),
                 (3, DVec2::new(head - 0.1, -0.2)),
                 (12, DVec2::new(head - 0.3, 0.1)),
             ],

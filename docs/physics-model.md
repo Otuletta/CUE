@@ -199,11 +199,12 @@ Two facts in the report exist only for the rules:
 
 ## Parameters
 
-`PhysicsProfile::baseline()` is id **`baseline-3`**. Any change to a value
+`PhysicsProfile::baseline()` is id **`baseline-4`**. Any change to a value
 bumps the id, so a change in behaviour is always visible.
 
 | Parameter | Value | Source |
 |---|---|---|
+| Table | 7 ft: a 78 × 39 in playing surface, with the 9-foot table's WPA pockets and cushions | The bar-box size most eight-ball is played on (see "Table size") |
 | Sliding friction μs | 0.2 | Alciatore, typical |
 | Rolling resistance μr | 0.018 | A medium-slow cloth, for the pace of play (see "Pace") |
 | Spinning friction μsp | 0.0117 (≈10 rad/s² spin decay) | Alciatore, typical |
@@ -234,6 +235,7 @@ measured on 20 racks with a full-power break struck square on the apex:
 | `baseline-1`: 8 m/s, frozen rack | 4.0 | 6.0 | 0.00 | 20/20 (only just) |
 | `baseline-2`: 12 m/s, spaced rack | 5.7 | 8.6 | 0.87 | 20/20 |
 | `baseline-3`: 12.5 m/s, slower cloth | 5.4 | 8.7 | 0.85 | 20/20 |
+| `baseline-4`: the same on a 7-foot table | 6.8 | 8.4 | 0.70 | 20/20 |
 
 A wider spacing (1–2 mm) did not spread the rack further. A hit a few
 millimetres off the apex still loses part of the break, as on a real table.
@@ -245,12 +247,14 @@ slider differently on the break, a fresh rack's first strike:
 | | Full power | Half | Quarter | Curve |
 |---|---:|---:|---:|---|
 | The break | 12.5 m/s | 3.1 m/s | 0.78 m/s | `p²` |
-| Every other shot | 7 m/s | 2.3 m/s | 0.76 m/s | `p^1.6` |
+| Every other shot | 6 m/s | 2.0 m/s | 0.65 m/s | `p^1.6` |
 
 As on a real table, nothing but the break is struck that hard. A full-power
 shot at 12 m/s ran the cue ball into eight cushions, which players found
-"far too strong". At 7 m/s it is a hard power shot of about five. The
-physics profile's top speed is the break's.
+"far too strong". The top for other shots was then 7 m/s on the 9-foot
+table, a hard power shot of about five cushions. On the 7-foot table it is
+6 m/s, which gives the same. The physics profile's top speed is the
+break's.
 
 ## Pace
 
@@ -267,20 +271,35 @@ third of the time. The break's full power rises from 12 to 12.5 m/s, a
 strong professional break, which restores it (table above). Other shots
 keep their 7 m/s top.
 
-Time until every ball is under 2 cm/s, for a lone cue ball struck from the
-head spot, centre ball:
+Time until every ball is under 2 cm/s, for a lone cue ball struck from
+behind the head string, centre ball:
 
-| Speed | `baseline-2` | `baseline-3` |
-|---|---:|---:|
-| 1 m/s (a touch) | 4.4–5.4 s | 2.7–4.1 s |
-| 2 m/s (a medium shot) | 6.1–7.5 s | 4.1–5.2 s |
-| 3 m/s | 5.4–8.3 s | 4.9–5.9 s |
-| 4.5 m/s (a firm shot) | 6.2–8.8 s | 4.3–6.3 s |
-| 7 m/s (full power) | 4.5–10.3 s | 5.2–7.1 s |
-| The break, median | 6.8 s | 5.2 s |
+| Speed | `baseline-2` | `baseline-3` | `baseline-4` (7 ft) |
+|---|---:|---:|---:|
+| 1 m/s (a touch) | 4.4–5.4 s | 2.7–4.1 s | 2.6–4.1 s |
+| 2 m/s (a medium shot) | 6.1–7.5 s | 4.1–5.2 s | 3.6–5.1 s |
+| 3 m/s | 5.4–8.3 s | 4.9–5.9 s | 3.9–5.2 s |
+| 4.5 m/s (a firm shot) | 6.2–8.8 s | 4.3–6.3 s | 4.2–5.9 s |
+| Full power (7 m/s; 6 m/s on `baseline-4`) | 4.5–10.3 s | 5.2–7.1 s | 4.4–6.1 s |
+| The break, median | 6.8 s | 5.2 s | 4.6 s |
 
 Ranges span three directions (along the table, 25° and 60°). The break's
-median is over 20 racks for `baseline-2` and 40 for `baseline-3`.
+median is over 20 racks for `baseline-2` and 40 for the others.
+
+## Table size
+
+Up to `baseline-3` the table was a 9-foot one (100 × 50 in), the
+tournament size. From straight above (ADR-0014) its balls are small on
+screen: about 2.2 % of the table's length, some 20 CSS pixels across on a
+laptop, too small to read the numbers at a glance. Eight-ball is mostly
+played on 7-foot bar tables, and that is the size players of mobile pool
+games know. `baseline-4` plays on one: a 78 × 39 in surface
+(`TableSpec::seven_foot`), with the same balls, pockets and cushions. The
+balls are 2.9 % of the length, 28 % larger on screen.
+
+The smaller table needs no new cloth: shots settle in the same 4–6 seconds
+(table above), and the break opens the rack wider, since the rails are
+closer. Only the top speed of ordinary shots drops, to 6 m/s.
 
 **Calibration status.** The profile is validated against the textbook and
 published behaviours listed above, which the test suite asserts. It has

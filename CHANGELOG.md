@@ -9,6 +9,25 @@ the physics profile id, even when no signature changes.
 
 ## [Unreleased]
 
+### Changed: a 7-foot table, and a table that reads from above
+
+- **The table is a 7-foot bar box** (78 × 39 in), the size most eight-ball
+  is played on. The balls, pockets and cushions are unchanged, so the balls
+  are 28 % larger on screen and their numbers read at a glance.
+- **Depth from light:** the cushions' tops slope up to the rail and catch
+  the lamp, the lamp is stronger and the fill lights weaker, so the cloth
+  has a pool of light, and the wood is a warmer walnut.
+- **Pockets:** each has a leather cap with a brass bead on the rail, in one
+  piece, instead of a brass ring that floated over the cushions.
+
+### Changed: shot outcomes (physics profile `baseline-4`)
+
+- **The 7-foot table** changes every shot's geometry. Shots still settle in
+  4–6 seconds; the break opens the rack wider (6.8 balls to a rail, 0.70
+  pocketed, 20/20 legal).
+- **Ordinary shots top out at 6 m/s** (was 7), the same five-cushion power
+  shot on the smaller table. Half power is 2 m/s.
+
 ### Changed: the table from straight above
 
 - **The camera looks straight down,** with an orthographic projection:

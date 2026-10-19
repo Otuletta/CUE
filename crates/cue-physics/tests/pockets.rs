@@ -6,7 +6,7 @@
 
 use std::f64::consts::FRAC_1_SQRT_2;
 
-use cue_core::{BallId, Layout, PocketId, ShotReport, TableSpec, eight_ball_rack, glam::DVec2};
+use cue_core::{BallId, Layout, PocketId, ShotReport, eight_ball_rack, glam::DVec2};
 use cue_physics::{Motion, PhysicsProfile, SimError, Strike, World};
 
 const R: f64 = 0.028575;
@@ -40,7 +40,7 @@ fn rolling(direction: DVec2, power: f64) -> Strike {
 }
 
 fn half() -> DVec2 {
-    TableSpec::nine_foot().half_extents()
+    PhysicsProfile::baseline().table.half_extents()
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn side_pockets_take_moderate_angles_and_reject_shallow_ones() {
 
 #[test]
 fn break_report_names_the_first_ball_hit_and_the_cushion_count() {
-    let table = TableSpec::nine_foot();
+    let table = PhysicsProfile::baseline().table;
     let rack = eight_ball_rack(&table, 11).unwrap();
     let apex = rack
         .iter()
@@ -151,7 +151,7 @@ fn a_scratched_cue_ball_must_be_placed_before_the_next_shot() {
         w.strike(Strike::centre(DVec2::X, 0.5)),
         Err(SimError::CueBallUnavailable)
     );
-    let table = TableSpec::nine_foot();
+    let table = PhysicsProfile::baseline().table;
     let spot = w.nearest_free_spot(BallId::CUE, table.head_spot()).unwrap();
     w.place(BallId::CUE, spot).unwrap();
     let second = play(&mut w, Strike::centre(DVec2::X, 0.2));
@@ -179,7 +179,7 @@ fn placement_is_validated() {
 
 #[test]
 fn nearest_free_spot_steps_around_an_occupied_spot() {
-    let table = TableSpec::nine_foot();
+    let table = PhysicsProfile::baseline().table;
     let w = world(&[(0, DVec2::new(0.5, 0.0)), (1, table.head_spot())]);
     let spot = w.nearest_free_spot(BallId::CUE, table.head_spot()).unwrap();
     assert!(spot.distance(table.head_spot()) >= 2.0 * R);
@@ -198,7 +198,7 @@ fn the_head_string_sensor_reports_each_crossing_of_the_cue_ball() {
             .filter(|e| e.kind == ShotEventKind::CueCrossedHeadString)
             .count()
     };
-    let table = TableSpec::nine_foot();
+    let table = PhysicsProfile::baseline().table;
 
     // A break: the cue ball leaves the kitchen before it reaches the rack.
     let mut w = World::new(

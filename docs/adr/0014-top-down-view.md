@@ -64,6 +64,22 @@ From straight above, three things change:
 - **The guide:** line widths are in CSS pixels, scaled by the screen's
   pixel ratio, so the guide is equally fine on a phone and a monitor.
 
+> **Amended (2026-10-19), after the owner's first look:** "no queda para
+> nada bien", for the table and the balls. Three changes followed:
+>
+> - **A 7-foot table** (physics profile `baseline-4`): on a 9-foot table seen
+>   from above the balls were about 20 CSS pixels across on a laptop. On the
+>   bar-box size most eight-ball is played on, they are 28 % larger
+>   (`docs/physics-model.md`, "Table size").
+> - **Depth from light and form:**
+>   - the cushions' tops slope up to the rail and catch the lamp;
+>   - the lamp is stronger and the fill lights weaker, so the cloth has a
+>     pool of light;
+>   - the wood is a warmer walnut.
+> - **Pockets:** a leather cap with a brass bead on the rail round each
+>   hole, swept in one piece, replaces the brass ring that floated over the
+>   cushions.
+
 ## Consequences
 
 **Positive**

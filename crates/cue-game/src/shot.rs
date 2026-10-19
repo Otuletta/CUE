@@ -42,11 +42,11 @@ pub const MIN_SHOT_POWER: f64 = 0.03;
 /// which gives soft shots more resolution.
 ///
 /// The break gets the full stroke, a strong real break at 12.5 m/s, so it
-/// opens the rack. Every other shot tops out at a hard 7 m/s: a real power
-/// shot, not a break by accident. Half power is then 2.3 m/s and a quarter
-/// 0.76.
+/// opens the rack. Every other shot tops out at a hard 6 m/s, about five
+/// cushions on the 7-foot table: a real power shot, not a break by accident.
+/// Half power is then 2 m/s and a quarter 0.65.
 const BREAK_POWER: (f64, f64) = (1.0, 2.0);
-const SHOT_POWER: (f64, f64) = (7.0 / 12.5, 1.6);
+const SHOT_POWER: (f64, f64) = (6.0 / 12.5, 1.6);
 
 /// The strike's power, as a fraction of the profile's top speed, for a
 /// slider at `power` on the break or on any other shot.
@@ -916,15 +916,15 @@ mod tests {
         let top = PhysicsProfile::baseline().cue.max_speed;
         let speed = |power, on_break| strike_power(power, on_break) * top;
         assert!((speed(1.0, true) - 12.5).abs() < 1e-9);
-        assert!((speed(1.0, false) - 7.0).abs() < 1e-9);
+        assert!((speed(1.0, false) - 6.0).abs() < 1e-9);
         // Soft and medium shots keep useful speeds.
         assert!(
-            (speed(0.5, false) - 2.31).abs() < 0.01,
+            (speed(0.5, false) - 1.98).abs() < 0.01,
             "{}",
             speed(0.5, false)
         );
         assert!(
-            (speed(0.25, false) - 0.76).abs() < 0.01,
+            (speed(0.25, false) - 0.65).abs() < 0.01,
             "{}",
             speed(0.25, false)
         );

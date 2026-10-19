@@ -96,6 +96,19 @@ impl TableSpec {
         }
     }
 
+    /// A 7-foot "bar box", the table most eight-ball is played on: a 78 × 39
+    /// in playing surface, with the pockets and cushions of
+    /// [`nine_foot`](Self::nine_foot). The balls are the same, so on screen
+    /// they are 28 % larger against the table.
+    pub const fn seven_foot() -> Self {
+        let nine = Self::nine_foot();
+        Self {
+            playfield_length: 78.0 * INCH,
+            playfield_width: 39.0 * INCH,
+            ..nine
+        }
+    }
+
     /// Checks that every dimension is finite, positive and mutually coherent.
     pub fn validate(&self) -> Result<(), CoreError> {
         let (c, sd) = (&self.corner_pocket, &self.side_pocket);
@@ -209,6 +222,15 @@ mod tests {
     use approx::assert_relative_eq;
 
     use super::*;
+
+    #[test]
+    fn seven_foot_table_is_valid_and_two_to_one() {
+        let t = TableSpec::seven_foot();
+        assert_eq!(t.validate(), Ok(()));
+        assert_relative_eq!(t.playfield_length, 1.9812);
+        assert_relative_eq!(t.playfield_length, 2.0 * t.playfield_width);
+        assert_eq!(t.corner_pocket, TableSpec::nine_foot().corner_pocket);
+    }
 
     #[test]
     fn nine_foot_table_is_valid_and_two_to_one() {

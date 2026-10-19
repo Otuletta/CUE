@@ -13,7 +13,7 @@ the code's licence (MIT or Apache-2.0).
 | Wood grain | Tileable growth rings and streaks for the frame; 512 × 128 with mip chains | Generated: warped value noise | `crates/cue-game/src/textures.rs` |
 | Pocket depth | The inside of a pocket from above: black, lifting to dark brown at the rim | Generated: a radial ramp | `crates/cue-game/src/textures.rs` |
 | Cue forearm | Four maple points inlaid in ebony, edged with brass veneer; 256 × 512 with mip chains | Generated: distance to the points' edges | `crates/cue-game/src/textures.rs` |
-| Table meshes | Cloth, cushions, chamfered rails, pocket surrounds cut round each hole, the frame's outer bevel, drop holes, brass lips and inlays, diamond sights, foot spot | Generated from the physics geometry and WPA dimensions | `crates/cue-game/src/scene.rs` |
+| Table meshes | Cloth, cushions with sloped tops, chamfered rails, pocket surrounds cut round each hole, leather pocket caps with brass beads, the frame's outer bevel, drop holes, brass inlays, diamond sights, foot spot | Generated from the physics geometry and WPA dimensions | `crates/cue-game/src/scene.rs` |
 | Cue | Ten tapered sections, from the tip to the bumper, with a brass joint and trim rings | Generated from real cue dimensions | `crates/cue-game/src/cue_stick.rs` |
 | Ball mesh | UV sphere | Bevy primitive | `crates/cue-game/src/scene.rs` |
 | Impact sounds | Ball click, cushion thump, pocket drop, cue tip | Generated: modal synthesis | `crates/cue-audio/src/lib.rs` |

@@ -6,7 +6,7 @@
 
 use approx::assert_relative_eq;
 use cue_core::{
-    BallId, Layout, TableSpec, eight_ball_rack,
+    BallId, Layout, eight_ball_rack,
     glam::{DVec2, DVec3},
 };
 use cue_physics::{
@@ -195,7 +195,7 @@ fn rejects_overlapping_or_off_table_layouts() {
 /// Plays a break, advancing with a given sequence of frame lengths, and
 /// returns every event and the final state.
 fn play_break(frame: impl Fn(usize) -> f64) -> (Vec<SimEvent>, Vec<(BallId, BallState)>) {
-    let table = TableSpec::nine_foot();
+    let table = PhysicsProfile::baseline().table;
     let mut w = World::new(
         PhysicsProfile::baseline(),
         &eight_ball_rack(&table, 7).unwrap(),
@@ -254,7 +254,7 @@ fn break_moves_the_rack_and_settles() {
 /// Object balls driven to a rail, pocketed, and moved more than 15 cm by a
 /// full-power break struck square on the apex ball.
 fn break_spread(seed: u64) -> (usize, usize, usize) {
-    let table = TableSpec::nine_foot();
+    let table = PhysicsProfile::baseline().table;
     let rack = eight_ball_rack(&table, seed).unwrap();
     let mut w = World::new(PhysicsProfile::baseline(), &rack).unwrap();
     w.strike(Strike::centre(DVec2::X, 1.0)).unwrap();
@@ -323,7 +323,7 @@ proptest! {
         tip_a in 0.0..std::f64::consts::TAU,
         seed: u64,
     ) {
-        let table = TableSpec::nine_foot();
+        let table = PhysicsProfile::baseline().table;
         let mut w = World::new(PhysicsProfile::baseline(), &eight_ball_rack(&table, seed).unwrap()).unwrap();
         w.strike(Strike {
             direction: DVec2::from_angle(angle),
@@ -347,7 +347,7 @@ proptest! {
 #[test]
 #[ignore = "stress test; run with --release -- --ignored"]
 fn a_thousand_consecutive_shots_stay_physical() {
-    let table = TableSpec::nine_foot();
+    let table = PhysicsProfile::baseline().table;
     let profile = PhysicsProfile::baseline();
     let mut racks = 1u64;
     let mut w = World::new(profile, &eight_ball_rack(&table, racks).unwrap()).unwrap();

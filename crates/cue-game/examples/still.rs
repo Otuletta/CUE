@@ -24,7 +24,7 @@ use bevy::{
     window::ExitCondition,
     winit::WinitPlugin,
 };
-use cue_game::{CuePlugin, Theme};
+use cue_game::{CuePlugin, Simulation, Theme};
 
 /// Frames rendered before the capture, so shaders compile and textures load.
 const SETTLE_FRAMES: u32 = 40;
@@ -84,6 +84,7 @@ fn aim_camera(
     mut commands: Commands,
     mut still: ResMut<Still>,
     mut images: ResMut<Assets<Image>>,
+    sim: Res<Simulation>,
     mut camera: Query<(Entity, &mut Transform, &mut Projection), With<Camera3d>>,
 ) {
     let Ok((entity, mut transform, mut projection)) = camera.single_mut() else {
@@ -99,15 +100,24 @@ fn aim_camera(
         .entity(entity)
         .insert(RenderTarget::Image(target.clone().into()));
     still.target = Some(target);
-    // The centre of the view and the half-extents it must show, in metres.
+    // The centre of the view and the half-extents it must show, in metres,
+    // from the table the game plays on.
+    let table = *sim.table();
+    let (foot, break_spot) = (table.foot_spot().as_vec2(), table.break_spot().as_vec2());
     let (centre, half) = match still.view.as_str() {
         // The rack at the foot spot.
-        "rack" => (Vec3::new(0.7, 0.0, 0.0), Vec2::new(0.18, 0.16)),
+        "rack" => (Vec3::new(foot.x + 0.065, 0.0, 0.0), Vec2::new(0.18, 0.16)),
         // The cue ball at the break spot, with the cue behind it as far as
         // its forearm.
-        "cue" => (Vec3::new(-1.15, 0.0, 0.0), Vec2::new(0.62, 0.2)),
-        // The whole table with its frame, as the game frames it.
-        _ => (Vec3::ZERO, Vec2::new(1.57, 0.94)),
+        "cue" => (
+            Vec3::new(break_spot.x - 0.5, 0.0, 0.0),
+            Vec2::new(0.62, 0.2),
+        ),
+        // The whole table with its rails (12 cm) and the game's margin (6 cm).
+        _ => (
+            Vec3::ZERO,
+            sim.world.geometry().outer_half_extents().as_vec2() + Vec2::splat(0.18),
+        ),
     };
     let aspect = still.size.x as f32 / still.size.y.max(1) as f32;
     let width = (half.x * 2.0).max(half.y * 2.0 * aspect);

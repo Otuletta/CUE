@@ -322,5 +322,5 @@ The API follows SemVer (spec §26.3). A breaking change to a method, an
 option, an event, a code or the state's meaning needs a major version.
 
 A physics change that alters shot outcomes is visible behaviour even if no
-signature changes. It bumps the physics profile id (now `baseline-3`) and is
+signature changes. It bumps the physics profile id (now `baseline-4`) and is
 recorded in the [changelog](../CHANGELOG.md).

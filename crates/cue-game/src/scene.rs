@@ -26,12 +26,17 @@ use crate::{
 
 /// Width of the wooden rail outside the cushion, metres.
 pub(crate) const RAIL_WIDTH: f32 = 0.12;
-/// Height of the cushion top above the cloth, metres.
-const CUSHION_HEIGHT: f32 = 0.044;
+/// Height of the cushion's top at its nose and at its back, metres. The top
+/// slopes up to the rail, so the lamp lights it as a band that reads as a
+/// raised cushion from straight above.
+const CUSHION_SLOPE: (f32, f32) = (0.03, 0.048);
 /// Height of the wooden rail top above the cloth, metres.
 const RAIL_HEIGHT: f32 = 0.05;
-/// Width and height of the brass lip round each pocket, metres.
-const POCKET_LIP: f32 = 0.006;
+/// Width of the leather cap round each pocket, on the rail, and how far it
+/// stands proud of the wood, metres.
+const POCKET_CAP: (f32, f32) = (0.03, 0.002);
+/// Width of the brass bead at the pocket's edge, on the cap, metres.
+const POCKET_BEAD: f32 = 0.0035;
 /// Distance from the cushion and width of the brass inlay on the rails, and
 /// how far it stands proud of the wood, metres.
 const INLAY: (f32, f32) = (0.004, 0.0004);
@@ -50,7 +55,7 @@ const LAMP_SHADES: [f32; 3] = [-0.75, 0.0, 0.75];
 /// Luminous power of each shade, lumens. Together they light the middle of
 /// the cloth to about the key light's level and let the corners and the room
 /// fall into shadow.
-const LAMP_LUMENS: f32 = 70_000.0;
+const LAMP_LUMENS: f32 = 100_000.0;
 /// The table's body below the rails, and the floor, metres below the cloth.
 const BODY_DEPTH: f32 = 0.2;
 const FLOOR_DEPTH: f32 = 0.76;
@@ -185,7 +190,7 @@ pub(crate) fn spawn_table(
     ) {
         // Cushion rubber, exactly over the collision outline.
         let quad = outline.map(flat);
-        spawn(prism(&quad, 0.0, CUSHION_HEIGHT), &cushion, Vec3::ZERO);
+        spawn(cushion_mesh(&quad), &cushion, Vec3::ZERO);
         // Wood behind it, from the back of the cushion to the rim, with the
         // grain along the rail.
         let normal = flat(segment.normal);
@@ -239,12 +244,39 @@ pub(crate) fn spawn_table(
             ]
         };
         // The rail's wood runs on round the pocket at the rail's height, cut
-        // round the hole; the hole's edge is a brass lip.
+        // round the hole.
         let centre = flat(pocket.centre);
         let radius = pocket.radius as f32;
         spawn(
-            surround_mesh(&surround, centre, radius, RAIL_HEIGHT),
+            surround_mesh(&surround, centre, radius, f32::INFINITY, RAIL_HEIGHT),
             &wood,
+            Vec3::ZERO,
+        );
+        // On the rail round the hole, a leather cap with a brass bead at its
+        // edge, as on a fine table. Both stay on the wood: the cushion's jaws
+        // run up to the hole between them.
+        spawn(
+            cap_mesh(
+                centre,
+                radius,
+                radius + POCKET_CAP.0,
+                outer,
+                inner,
+                RAIL_HEIGHT + POCKET_CAP.1,
+            ),
+            &leather,
+            Vec3::ZERO,
+        );
+        spawn(
+            cap_mesh(
+                centre,
+                radius,
+                radius + POCKET_BEAD,
+                outer,
+                inner,
+                RAIL_HEIGHT + POCKET_CAP.1 + 0.0004,
+            ),
+            &brass,
             Vec3::ZERO,
         );
         // The drop, dark towards its middle, down at the cloth.
@@ -252,15 +284,6 @@ pub(crate) fn spawn_table(
             Cylinder::new(radius, 0.001).mesh().resolution(64).build(),
             &hole,
             Vec3::new(centre.x, 0.0005, centre.y),
-        );
-        spawn(
-            Extrusion::new(Annulus::new(radius, radius + POCKET_LIP), POCKET_LIP)
-                .mesh()
-                .resolution(64)
-                .build()
-                .rotated_by(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-            &brass,
-            Vec3::new(centre.x, RAIL_HEIGHT - POCKET_LIP / 2.0 + 0.0015, centre.y),
         );
     }
 
@@ -322,8 +345,8 @@ pub(crate) fn spawn_table(
                 range: 4.0,
                 radius: 0.15,
                 shadow_maps_enabled: false,
-                inner_angle: 0.55,
-                outer_angle: 1.05,
+                inner_angle: 0.45,
+                outer_angle: 0.95,
                 ..default()
             },
             Transform::from_xyz(x, LAMP_HEIGHT, 0.0).looking_at(Vec3::new(x, 0.0, 0.0), Vec3::X),
@@ -334,7 +357,7 @@ pub(crate) fn spawn_table(
     // shadow cascade fitted to the table rather than to a landscape.
     commands.spawn((
         DirectionalLight {
-            illuminance: 3_500.0,
+            illuminance: 1_500.0,
             shadow_maps_enabled: true,
             ..default()
         },
@@ -381,6 +404,77 @@ const RAIL_CHAMFER: (f32, f32) = (0.012, 0.0);
 /// surrounds read as a single frame of wood.
 const RIM_BEVEL: (f32, f32) = (0.024, 0.018);
 
+/// A ring round a pocket's hole, from `radius` to `reach` round `centre`, on
+/// the rails only: outside the back of the cushions (`outer`) and inside the
+/// frame's outer bevel (`inner`), at `height`. Swept as rays from the centre
+/// in one piece, so it has no seams where two rails meet.
+fn cap_mesh(centre: Vec2, radius: f32, reach: f32, outer: Vec2, inner: Vec2, height: f32) -> Mesh {
+    const STEPS: usize = 360;
+    let rect = |h: Vec2| vec![-h, Vec2::new(h.x, -h.y), h, Vec2::new(-h.x, h.y)];
+    let (cushions, frame) = (rect(outer), rect(inner));
+    let mut angles: Vec<f32> = (0..STEPS).map(|k| k as f32 / STEPS as f32 * TAU).collect();
+    angles.extend(
+        cushions
+            .iter()
+            .map(|v| (*v - centre).to_angle().rem_euclid(TAU)),
+    );
+    angles.sort_by(f32::total_cmp);
+    angles.dedup_by(|a, b| (*a - *b).abs() < 1e-5);
+    let span = |a: f32| {
+        let dir = Vec2::from_angle(a);
+        let (_, out) = ray_in_convex(&frame, centre, dir)?;
+        let end = out.min(reach);
+        let (from, to) = match ray_in_convex(&cushions, centre, dir) {
+            // The ray reaches the cushions after leaving the hole: the cap
+            // runs up to them.
+            Some((enter, _)) if enter > radius => (radius, end.min(enter)),
+            // It starts over the cushions: the cap begins where it leaves them.
+            Some((_, exit)) => (radius.max(exit), end),
+            None => (radius, end),
+        };
+        (to > from + 1e-5).then_some((centre + dir * from, centre + dir * to))
+    };
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    for i in 0..angles.len() {
+        let (Some((a0, a1)), Some((b0, b1))) =
+            (span(angles[i]), span(angles[(i + 1) % angles.len()]))
+        else {
+            continue;
+        };
+        // Counter-clockwise seen from above, as in `surround_mesh`.
+        for p in [a0, b1, a1, a0, b0, b1] {
+            positions.push([p.x, height, p.y]);
+        }
+    }
+    let count = positions.len();
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0f32, 1.0, 0.0]; count])
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0f32, 0.0]; count])
+    .with_inserted_indices(Indices::U32((0..count as u32).collect()))
+}
+
+/// A cushion section: `quad` is its two nose points, then the two ends
+/// behind them. The top slopes from the nose up to the back
+/// ([`CUSHION_SLOPE`]); the sides stand straight.
+fn cushion_mesh(quad: &[Vec2; 4]) -> Mesh {
+    let (a, b) = (quad[0], quad[1]);
+    let across = (b - a).perp().normalize_or_zero();
+    let depth = |p: Vec2| (p - a).dot(across).abs();
+    let full = depth(quad[2]).max(depth(quad[3])).max(1e-6);
+    let (nose, back) = CUSHION_SLOPE;
+    prism_shaped(
+        quad,
+        0.0,
+        &|p| nose + (back - nose) * (depth(p) / full).clamp(0.0, 1.0),
+        Vec2::X,
+        Vec2::ONE,
+    )
+}
+
 /// The part of a ray from `origin` along `dir` inside a convex polygon, as
 /// `(enter, exit)` distances (Cyrus–Beck clipping).
 fn ray_in_convex(polygon: &[Vec2], origin: Vec2, dir: Vec2) -> Option<(f32, f32)> {
@@ -412,9 +506,10 @@ fn ray_in_convex(polygon: &[Vec2], origin: Vec2, dir: Vec2) -> Option<(f32, f32)
 }
 
 /// The flat top of a convex `outline` at `height`, with a hole of `radius`
-/// round `centre` cut out of it: swept as rays from the centre, through
-/// every corner of the outline and every few degrees between them.
-fn surround_mesh(outline: &[Vec2], centre: Vec2, radius: f32, height: f32) -> Mesh {
+/// round `centre` cut out of it and nothing farther than `reach` from the
+/// centre: swept as rays from the centre, through every corner of the
+/// outline and every few degrees between them.
+fn surround_mesh(outline: &[Vec2], centre: Vec2, radius: f32, reach: f32, height: f32) -> Mesh {
     const STEPS: usize = 160;
     let mut angles: Vec<f32> = (0..STEPS).map(|k| k as f32 / STEPS as f32 * TAU).collect();
     angles.extend(
@@ -427,8 +522,8 @@ fn surround_mesh(outline: &[Vec2], centre: Vec2, radius: f32, height: f32) -> Me
     let span = |a: f32| {
         let dir = Vec2::from_angle(a);
         ray_in_convex(outline, centre, dir).and_then(|(enter, exit)| {
-            let from = enter.max(radius);
-            (exit > from + 1e-5).then_some((centre + dir * from, centre + dir * exit))
+            let (from, to) = (enter.max(radius), exit.min(reach));
+            (to > from + 1e-5).then_some((centre + dir * from, centre + dir * to))
         })
     };
     let mut positions: Vec<[f32; 3]> = Vec::new();
@@ -613,8 +708,20 @@ fn prism(outline: &[Vec2], bottom: f32, top: f32) -> Mesh {
 /// across it on the top face, and round the outline and up on the sides,
 /// one repeat per `tile` metres.
 fn prism_mapped(outline: &[Vec2], bottom: f32, top: f32, along: Vec2, tile: Vec2) -> Mesh {
+    prism_shaped(outline, bottom, &|_| top, along, tile)
+}
+
+/// [`prism_mapped`] with a top whose height varies over the outline: `top`
+/// gives it at each corner.
+fn prism_shaped(
+    outline: &[Vec2],
+    bottom: f32,
+    top: &dyn Fn(Vec2) -> f32,
+    along: Vec2,
+    tile: Vec2,
+) -> Mesh {
     let centre = outline.iter().copied().sum::<Vec2>() / outline.len() as f32;
-    let centre3 = Vec3::new(centre.x, (top + bottom) / 2.0, centre.y);
+    let centre3 = Vec3::new(centre.x, (top(centre) + bottom) / 2.0, centre.y);
     let across = along.perp();
     let mut positions: Vec<[f32; 3]> = Vec::new();
     let mut normals: Vec<[f32; 3]> = Vec::new();
@@ -635,7 +742,7 @@ fn prism_mapped(outline: &[Vec2], bottom: f32, top: f32, along: Vec2, tile: Vec2
             uvs.push(uv.to_array());
         }
     };
-    let up = |p: Vec2| Vec3::new(p.x, top, p.y);
+    let up = |p: Vec2| Vec3::new(p.x, top(p), p.y);
     let down = |p: Vec2| Vec3::new(p.x, bottom, p.y);
     let plan = |p: Vec2| Vec2::new(p.dot(along), p.dot(across)) / tile;
     for i in 1..outline.len() - 1 {
@@ -651,8 +758,8 @@ fn prism_mapped(outline: &[Vec2], bottom: f32, top: f32, along: Vec2, tile: Vec2
         let (pb, qb, qt, pt) = (
             side(run, bottom),
             side(next, bottom),
-            side(next, top),
-            side(run, top),
+            side(next, top(q)),
+            side(run, top(p)),
         );
         triangle([(down(p), pb), (down(q), qb), (up(q), qt)]);
         triangle([(down(p), pb), (up(q), qt), (up(p), pt)]);
